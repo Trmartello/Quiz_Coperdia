@@ -1,0 +1,14 @@
+{
+  "name": "quiz-coperdia",
+  "version": "1.0.0",
+  "description": "Quiz interativo para validação de aprendizado ao final dos treinamentos",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
