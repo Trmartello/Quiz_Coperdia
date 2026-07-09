@@ -193,6 +193,8 @@ input:focus, textarea:focus, select:focus {
   margin-bottom: 20px;
   line-height: 1.45;
 }
+.q-big { font-size: 1.4rem; text-align: center; }
+.side-title { font-size: 1.05rem; }
 
 /* ===== Resultado ===== */
 .badge {
@@ -931,3 +933,54 @@ tr:hover td { background: var(--primary-light); }
 @media (max-width: 560px) {
   .brand small { display: none; }
 }
+
+/* ===== Modo telão (rotas #/host) =====
+   O público pode estar longe da projeção: menos padding, conteúdo mais largo
+   e tipografia/gráficos consideravelmente maiores. */
+body.screen-host .container { max-width: 1560px; padding: 12px 18px 20px; }
+body.screen-host .footer { display: none; }
+body.screen-host .topbar { padding: 8px 20px; }
+body.screen-host .card { padding: 14px 20px; margin-bottom: 10px; }
+body.screen-host .live-hero { padding: 20px 18px; }
+
+/* Cabeçalho da questão: progresso e cronômetro legíveis de longe */
+body.screen-host .quiz-header { margin-bottom: 8px; }
+body.screen-host .quiz-progress-text { font-size: 1.1rem; }
+body.screen-host .timer { font-size: 1.5rem; }
+body.screen-host .timer-track { height: 8px; margin-bottom: 10px; }
+
+/* Enunciado, mídia e alternativas */
+body.screen-host .q-big { font-size: clamp(1.6rem, 2.8vw, 2.5rem); margin-bottom: 12px; line-height: 1.25; }
+body.screen-host .q-media { margin: 4px 0 12px; }
+body.screen-host .q-media img { max-height: 30vh; }
+body.screen-host .q-media.small img { max-height: 20vh; }
+body.screen-host .live-options { gap: 12px; }
+body.screen-host .live-option { font-size: clamp(1.15rem, 1.8vw, 1.7rem); min-height: 86px; padding: 16px 20px; border-radius: 12px; }
+body.screen-host .live-option .shape { font-size: 1.9rem; }
+body.screen-host .live-option .count { font-size: 1.25rem; padding: 3px 16px; }
+body.screen-host .live-options.tf .live-option { min-height: 110px; font-size: clamp(1.3rem, 2vw, 1.9rem); }
+
+/* Gráfico de colunas do resultado */
+body.screen-host .dist-bars { gap: clamp(20px, 4vw, 56px); margin-top: 18px; }
+body.screen-host .dist-bar { width: clamp(56px, 6vw, 92px); }
+body.screen-host .dist-count { font-size: 1.6rem; }
+body.screen-host .dist-shape { font-size: 1.35rem; }
+
+/* Ranking parcial (coluna da direita) */
+body.screen-host .side-title { font-size: 1.25rem; }
+body.screen-host .reveal-layout { gap: 14px; }
+body.screen-host .reveal-side .rank-row { font-size: 1.05rem; padding: 9px 11px; }
+body.screen-host .reveal-side .rank-score { font-size: 1rem; }
+body.screen-host .reveal-side .rank-avatar { font-size: 1.35rem; }
+
+/* Tipos de opinião/conteúdo no telão */
+body.screen-host .word-cloud { zoom: 1.6; }
+body.screen-host .scale-btn { width: 92px; height: 92px; font-size: 2rem; }
+body.screen-host .scale-btn .count { font-size: 1rem; padding: 4px 10px; }
+body.screen-host .scale-labels { font-size: 1.15rem; }
+body.screen-host .slide-body { font-size: clamp(1.2rem, 1.8vw, 1.6rem); max-width: 1100px; }
+body.screen-host .accepted-answers .pill { font-size: 1.1rem; }
+
+/* Lobby: PIN/QR maiores para quem vai apontar a câmera de longe */
+body.screen-host #qr-box svg { width: 250px; height: 250px; }
+body.screen-host .chip { font-size: 1.05rem; padding: 8px 16px; }

@@ -119,6 +119,9 @@
     const nav = document.querySelector('.topbar nav');
     if (nav) nav.style.display = (parts[0] === 'host' || parts[0] === 'admin') ? '' : 'none';
 
+    // Modo telão: no host tudo fica maior e mais denso (público pode estar longe da projeção)
+    document.body.classList.toggle('screen-host', parts[0] === 'host');
+
     if (parts[0] === '' || parts[0] === undefined) {
       renderHome();
     } else if (parts[0] === 'join' && parts[1]) {

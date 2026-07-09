@@ -414,7 +414,7 @@ const Live = (() => {
     container.innerHTML = `
       <div class="card">
         ${timerHeader(s, ` — PIN ${Host.pin}`)}
-        <p class="question-text" style="font-size:1.5rem;text-align:center">${esc(q.text)}</p>
+        <p class="question-text q-big">${esc(q.text)}</p>
         ${mediaHtml(q)}
         ${body}
         ${q.multi ? '<p class="muted" style="text-align:center;margin-top:10px">Múltipla escolha: selecione todas as corretas e envie</p>' : ''}
@@ -455,7 +455,7 @@ const Live = (() => {
             return `
               <div class="dist-col">
                 <span class="dist-count">${pct}%</span>
-                <div class="dist-bar green" style="height:${Math.max(6, (s.counts[i] / total) * 90)}px"></div>
+                <div class="dist-bar green" style="height:${Math.max(8, (s.counts[i] / total) * 170)}px"></div>
                 <span class="dist-shape green">${esc(o)} <b>${s.counts[i]}</b></span>
               </div>`;
           }).join('')}
@@ -473,7 +473,7 @@ const Live = (() => {
             return `
               <div class="dist-col">
                 <span class="dist-count">${pct}%</span>
-                <div class="dist-bar ${color}" style="height:${Math.max(6, (s.counts[i] / total) * 90)}px"></div>
+                <div class="dist-bar ${color}" style="height:${Math.max(8, (s.counts[i] / total) * 170)}px"></div>
                 <span class="dist-shape ${color}">${shape} <b>${s.counts[i]}</b></span>
               </div>`;
           }).join('')}
@@ -490,7 +490,7 @@ const Live = (() => {
           <div class="quiz-header">
             <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions} — ${scored ? 'resultado' : 'respostas'}</span>
           </div>
-          <p class="question-text" style="font-size:1.3rem;text-align:center">${esc(q.text)}</p>
+          <p class="question-text q-big">${esc(q.text)}</p>
           ${mediaHtml(q, 'small')}
           ${body}
         </div>
@@ -498,7 +498,7 @@ const Live = (() => {
           ${q.type === 'slide' ? '<p class="muted">Slide de conteúdo — sem respostas. 📖</p>'
             : !scored ? '<p class="muted">Esta pergunta não vale pontos — obrigado pelas opiniões! 💬</p>'
             : s.showRanking ? `
-            <h2 style="font-size:1.05rem">🏆 Ranking parcial</h2>
+            <h2 class="side-title">🏆 Ranking parcial</h2>
             <div class="rank-grid">
               ${s.leaderboard.map(p => `
                 <div class="rank-row">
