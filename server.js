@@ -22,6 +22,9 @@ const POINTS_MULTIPLIER = { standard: 1, double: 2, none: 0 };
 // Mesma lista do cliente (js/app.js) — avatares permitidos
 const AVATARS = ['😀','😎','🤩','😜','🤓','😺','🐶','🐼','🦊','🦁','🐸','🐵','🦄','🐙','🐝','🦉','🚀','⚽','🎮','🎸','🔥','⭐','🍕','🤖','👻','🤠','💪','🧠','🎯','🏆'];
 
+// Mesma lista do cliente (js/live.js) — reações rápidas permitidas
+const REACTIONS = ['👍','👏','❤️','😂','🤔','😮'];
+
 const rooms = new Map(); // pin -> room
 
 /* ==================== Utilidades ==================== */
@@ -459,6 +462,24 @@ async function handleApi(req, res, urlPath, query) {
     touch(room);
     broadcast(room);
     return json(res, 201, { playerId, name, avatar });
+  }
+
+  // POST /api/rooms/:pin/react — reação emoji; flutua nas telas de todos (evento SSE, sem estado)
+  if (req.method === 'POST' && action === '/react') {
+    const body = await readBody(req);
+    const player = room.players.get(String(body.playerId || ''));
+    if (!player) return json(res, 403, { error: 'Participante não encontrado.' });
+    if (!REACTIONS.includes(body.emoji)) return json(res, 400, { error: 'Reação inválida.' });
+    const now = Date.now();
+    if (now - (player.lastReactAt || 0) >= 600) { // ignora spam sem devolver erro
+      player.lastReactAt = now;
+      touch(room);
+      const payload = `event: reaction\ndata: ${JSON.stringify({ emoji: body.emoji })}\n\n`;
+      for (const conn of room.connections) {
+        try { conn.res.write(payload); } catch { /* conexão morta */ }
+      }
+    }
+    return json(res, 200, { ok: true });
   }
 
   // POST /api/rooms/:pin/answer — participante responde a questão atual

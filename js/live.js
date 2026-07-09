@@ -3,9 +3,21 @@
 const Live = (() => {
   const COLORS = ['red', 'blue', 'yellow', 'green', 'purple', 'orange'];
   const SHAPES = ['▲', '◆', '●', '■', '★', '⬟'];
+  // Mesma lista do servidor — reações rápidas permitidas
+  const REACTIONS = ['👍','👏','❤️','😂','🤔','😮'];
+  const TYPE_LABELS = { quiz: '🎯 Quiz', tf: '⚖️ Verdadeiro ou falso', poll: '📊 Enquete', wordcloud: '☁️ Nuvem de palavras' };
 
   let es = null;            // EventSource ativo
   let countdown = null;     // interval do timer visual
+  let lastSnap = null;      // último snapshot recebido (para decisões pós-await)
+  // Evita redesenhar a mesma tela a cada snapshot (preserva digitação e animações)
+  const View = { key: null };
+
+  function viewOnce(key) {
+    if (View.key === key) return false;
+    View.key = key;
+    return true;
+  }
 
   function esc(s) {
     const d = document.createElement('div');
@@ -31,9 +43,85 @@ const Live = (() => {
 
   function listen(pin, params, onState, onError) {
     stop();
+    View.key = null;
     es = new EventSource(`/api/rooms/${pin}/events?${params}`);
-    es.onmessage = e => onState(JSON.parse(e.data));
+    es.onmessage = e => {
+      lastSnap = JSON.parse(e.data);
+      onState(lastSnap);
+    };
+    es.addEventListener('reaction', e => {
+      try { spawnReaction(JSON.parse(e.data).emoji); } catch { /* ignora */ }
+    });
     es.onerror = () => { if (onError) onError(); };
+  }
+
+  /* ---------- Reações emoji flutuantes (estilo Kahoot) ---------- */
+
+  function reactionLayer() {
+    let layer = document.getElementById('reaction-layer');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = 'reaction-layer';
+      document.body.appendChild(layer);
+    }
+    return layer;
+  }
+
+  // Faz um emoji gigante subir flutuando pela tela
+  function spawnReaction(emoji) {
+    const layer = reactionLayer();
+    if (layer.childElementCount > 40) return; // não sobrecarrega em salas grandes
+    const el = document.createElement('span');
+    el.className = 'float-emoji';
+    el.textContent = emoji;
+    el.style.left = (6 + Math.random() * 84) + '%';
+    el.style.setProperty('--dur', (2.2 + Math.random() * 1.2).toFixed(2) + 's');
+    el.style.setProperty('--rot', (Math.random() * 36 - 18).toFixed(0) + 'deg');
+    el.style.fontSize = (1.8 + Math.random() * 1.4).toFixed(2) + 'rem';
+    el.addEventListener('animationend', () => el.remove());
+    layer.appendChild(el);
+  }
+
+  let lastReactAt = 0;
+  function reactionBarHtml() {
+    return `
+      <div class="reaction-bar">
+        ${REACTIONS.map(r => `<button type="button" class="reaction-btn" data-react="${r}">${r}</button>`).join('')}
+      </div>
+    `;
+  }
+
+  function wireReactionBar(container) {
+    container.querySelectorAll('[data-react]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const now = Date.now();
+        if (now - lastReactAt < 600) return;
+        lastReactAt = now;
+        btn.classList.remove('reacted');
+        void btn.offsetWidth; // reinicia a animação do botão
+        btn.classList.add('reacted');
+        api(`/api/rooms/${Player.pin}/react`, { playerId: Player.id, emoji: btn.dataset.react })
+          .catch(() => { /* sala pode ter expirado — reação é opcional */ });
+      });
+    });
+  }
+
+  /* ---------- Introdução animada da questão (estilo Kahoot) ---------- */
+
+  // Mostra por ~2,2s uma vinheta com nº, tipo e enunciado antes das alternativas
+  function showQuestionIntro(s) {
+    const q = s.question;
+    const root = document.getElementById('modal-root');
+    if (!root || root.querySelector('.q-intro')) return;
+    const el = document.createElement('div');
+    el.className = 'q-intro';
+    el.innerHTML = `
+      <span class="q-intro-num">${s.questionIndex + 1}</span>
+      <span class="q-intro-type">${TYPE_LABELS[q.type] || 'Quiz'}</span>
+      <p class="q-intro-text">${esc(q.text)}</p>
+    `;
+    root.appendChild(el);
+    setTimeout(() => el.remove(), 2400);
   }
 
   function startCountdown(container, remainingMs, limitMs) {
@@ -169,8 +257,17 @@ const Live = (() => {
   }
 
   function drawHost(container, s) {
+    if (s.state === 'question') {
+      // A mesma questão só é desenhada uma vez — os snapshots seguintes atualizam apenas o contador
+      if (!viewOnce(`hq:${s.questionIndex}`)) {
+        const el = container.querySelector('#host-answered');
+        if (el) el.textContent = `✋ ${s.answeredCount}/${s.playersCount} responderam`;
+        return;
+      }
+      return drawHostQuestion(container, s);
+    }
+    View.key = `h:${s.state}:${s.questionIndex}`;
     if (s.state === 'lobby') return drawHostLobby(container, s);
-    if (s.state === 'question') return drawHostQuestion(container, s);
     if (s.state === 'reveal') return drawHostReveal(container, s);
     if (s.state === 'podium') return drawHostPodium(container, s);
   }
@@ -286,13 +383,14 @@ const Live = (() => {
         ` : optionsHtml(q)}
         ${q.multi ? '<p class="muted" style="text-align:center;margin-top:10px">Múltipla escolha: selecione todas as corretas e envie</p>' : ''}
         <div class="quiz-header" style="margin-top:16px">
-          <span class="quiz-progress-text">✋ ${s.answeredCount}/${s.playersCount} responderam</span>
+          <span class="quiz-progress-text" id="host-answered">✋ ${s.answeredCount}/${s.playersCount} responderam</span>
           <button class="btn btn-secondary" id="btn-reveal">Encerrar tempo</button>
         </div>
       </div>
     `;
     startCountdown(container, s.remainingMs, s.limitMs);
     container.querySelector('#btn-reveal').addEventListener('click', () => hostCommand(container, 'reveal'));
+    showQuestionIntro(s);
   }
 
   function drawHostReveal(container, s) {
@@ -312,9 +410,9 @@ const Live = (() => {
             const pct = Math.round((s.counts[i] / total) * 100);
             return `
               <div class="dist-col">
-                <span class="dist-count">${s.counts[i]} <small>(${pct}%)</small></span>
+                <span class="dist-count">${pct}%</span>
                 <div class="dist-bar ${color}" style="height:${Math.max(6, (s.counts[i] / total) * 90)}px"></div>
-                <span class="dist-shape ${color}">${shape}</span>
+                <span class="dist-shape ${color}">${shape} <b>${s.counts[i]}</b></span>
               </div>`;
           }).join('')}
         </div>
@@ -325,30 +423,30 @@ const Live = (() => {
       ? `<span class="rank-delta up">▲ ${d}</span>`
       : d < 0 ? `<span class="rank-delta down">▼ ${-d}</span>` : '<span class="rank-delta">—</span>';
     container.innerHTML = `
-      <div class="card">
-        <div class="quiz-header">
-          <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions} — ${scored ? 'resultado' : 'respostas'}</span>
-        </div>
-        <p class="question-text" style="font-size:1.3rem;text-align:center">${esc(q.text)}</p>
-        ${mediaHtml(q, 'small')}
-        ${body}
-      </div>
-      <div class="card">
-        ${!scored ? '<p class="muted">Esta pergunta não vale pontos — obrigado pelas opiniões! 💬</p>'
-          : s.showRanking ? `
-          <h2>🏆 Ranking parcial</h2>
-          <div class="rank-grid">
-            ${s.leaderboard.map(p => `
-              <div class="rank-row">
-                <span class="rank-pos">${p.rank}º</span>
-                ${deltaBadge(p.delta)}
-                <span class="rank-name"><span class="rank-avatar">${esc(p.avatar || '🙂')}</span> ${esc(p.name)}</span>
-                <span class="rank-score">${p.score} pts</span>
-              </div>`).join('')}
+      <div class="reveal-layout">
+        <div class="card">
+          <div class="quiz-header">
+            <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions} — ${scored ? 'resultado' : 'respostas'}</span>
           </div>
-        ` : '<p class="muted">Ranking oculto durante o jogo — a classificação aparece no pódio final. 🤫</p>'}
-        <div class="btn-row" style="justify-content:flex-end">
-          <button class="btn btn-primary" id="btn-next">${s.isLast ? '🏁 Ver pódio' : 'Próxima questão →'}</button>
+          <p class="question-text" style="font-size:1.3rem;text-align:center">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          ${body}
+        </div>
+        <div class="card reveal-side">
+          ${!scored ? '<p class="muted">Esta pergunta não vale pontos — obrigado pelas opiniões! 💬</p>'
+            : s.showRanking ? `
+            <h2 style="font-size:1.05rem">🏆 Ranking parcial</h2>
+            <div class="rank-grid">
+              ${s.leaderboard.map(p => `
+                <div class="rank-row">
+                  <span class="rank-pos">${p.rank}º</span>
+                  ${deltaBadge(p.delta)}
+                  <span class="rank-name"><span class="rank-avatar">${esc(p.avatar || '🙂')}</span> ${esc(p.name)}</span>
+                  <span class="rank-score">${p.score} pts</span>
+                </div>`).join('')}
+            </div>
+          ` : '<p class="muted">Ranking oculto durante o jogo — a classificação aparece no pódio final. 🤫</p>'}
+          <button class="btn btn-primary" id="btn-next" style="width:100%;margin-top:12px">${s.isLast ? '🏁 Ver pódio' : 'Próxima questão →'}</button>
         </div>
       </div>
     `;
@@ -606,8 +704,13 @@ const Live = (() => {
   }
 
   function drawPlayer(container, s) {
+    if (s.state === 'question') {
+      // Não redesenha a mesma questão a cada snapshot — preserva o que o participante digitou/selecionou
+      if (!viewOnce(`pq:${s.questionIndex}:${s.answered ? 1 : 0}`)) return;
+      return drawPlayerQuestion(container, s);
+    }
+    View.key = `p:${s.state}:${s.questionIndex}`;
     if (s.state === 'lobby') return drawPlayerLobby(container, s);
-    if (s.state === 'question') return drawPlayerQuestion(container, s);
     if (s.state === 'reveal') return drawPlayerReveal(container, s);
     if (s.state === 'podium') return drawPlayerPodium(container, s);
   }
@@ -619,9 +722,11 @@ const Live = (() => {
         <h1>Você está dentro, ${esc(Player.name)}!</h1>
         <p class="subtitle">${esc(s.quizName)}</p>
         <p class="muted">Veja seu nome no telão e aguarde o instrutor iniciar o jogo.</p>
+        ${reactionBarHtml()}
         <p class="muted" id="conn-note"></p>
       </div>
     `;
+    wireReactionBar(container);
   }
 
   async function sendAnswer(container, s, answer) {
@@ -631,6 +736,9 @@ const Live = (() => {
         questionIndex: s.questionIndex,
         answer,
       });
+      // Se éramos o último a responder, o reveal pode já ter chegado — não sobrescreve
+      if (lastSnap && (lastSnap.state !== 'question' || lastSnap.questionIndex !== s.questionIndex)) return;
+      View.key = `pq:${s.questionIndex}:1`; // o próximo snapshot (já respondida) não redesenha
       drawWaiting(container);
     } catch { /* fora do tempo — o próximo snapshot resolve a tela */ }
   }
@@ -641,13 +749,16 @@ const Live = (() => {
         <div class="big" style="font-size:3rem">⚡</div>
         <h1>Resposta enviada!</h1>
         <p class="muted">Aguardando os demais participantes...</p>
+        ${reactionBarHtml()}
       </div>
     `;
+    wireReactionBar(container);
   }
 
   function drawPlayerQuestion(container, s) {
     if (s.answered) return drawWaiting(container);
     const q = s.question;
+    showQuestionIntro(s); // vinheta em todos os tipos de questão
 
     // Nuvem de palavras: campos de texto livre (até q.maxAnswers respostas por participante)
     if (q.type === 'wordcloud') {
@@ -742,8 +853,10 @@ const Live = (() => {
           <div class="big" style="font-size:3rem">${me.answered ? '💬' : '⏰'}</div>
           <h1>${me.answered ? 'Obrigado pela sua opinião!' : 'Tempo esgotado!'}</h1>
           <p class="muted">Veja as respostas de todos no telão.</p>
+          ${reactionBarHtml()}
         </div>
       `;
+      wireReactionBar(container);
       return;
     }
 
@@ -770,8 +883,10 @@ const Live = (() => {
           ${me.rank ? `<div class="stat"><strong>${me.rank}º</strong><span>posição</span></div>` : ''}
         </div>
         ${me.rank ? deltaMsg : ''}
+        ${reactionBarHtml()}
       </div>
     `;
+    wireReactionBar(container);
   }
 
   function drawPlayerPodium(container, s) {
@@ -793,11 +908,13 @@ const Live = (() => {
             <div class="stat"><strong>${me.percent ?? 0}%</strong><span>nota (mín. ${s.passScore}%)</span></div>
           ` : ''}
         </div>
+        ${reactionBarHtml()}
         <div class="btn-row" style="justify-content:center">
           <a href="#/" class="btn btn-primary">Concluir</a>
         </div>
       </div>
     `;
+    wireReactionBar(container);
     sessionStorage.removeItem('qc_player');
   }
 

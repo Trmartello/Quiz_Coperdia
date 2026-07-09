@@ -602,8 +602,8 @@ tr:hover td { background: var(--primary-light); }
   color: var(--text);
   line-height: 1;
 }
-.dist-count small { font-weight: 600; color: #667; }
 .dist-shape { font-size: 0.95rem; font-weight: 700; line-height: 1; }
+.dist-shape b { color: var(--text); margin-left: 2px; }
 .dist-shape.red { color: #e21b3c; }
 .dist-shape.blue { color: #1368ce; }
 .dist-shape.yellow { color: #d89e00; }
@@ -618,14 +618,25 @@ tr:hover td { background: var(--primary-light); }
 .dist-bar.purple { background: #7b2ff2; }
 .dist-bar.orange { background: #e06000; }
 
-/* Ranking parcial em duas colunas (1º–5º à esquerda, 6º–10º à direita) */
-.rank-grid {
+/* Resultado em duas colunas: questão (75%) + ranking parcial à direita (máx. 25%) */
+.reveal-layout {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(5, auto);
-  grid-auto-flow: column;
-  column-gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 25%;
+  gap: 20px;
+  align-items: start;
 }
+.reveal-side { position: sticky; top: 16px; }
+.reveal-side .rank-row { padding: 7px 9px; gap: 6px; margin-bottom: 6px; font-size: 0.85rem; }
+.reveal-side .rank-pos { width: 26px; }
+.reveal-side .rank-delta { width: 30px; }
+.reveal-side .rank-score { font-size: 0.8rem; white-space: nowrap; }
+@media (max-width: 860px) {
+  .reveal-layout { grid-template-columns: 1fr; }
+  .reveal-side { position: static; }
+}
+
+/* Lista do ranking: um participante abaixo do outro */
+.rank-grid { display: block; }
 .rank-row {
   display: flex;
   align-items: center;
@@ -671,7 +682,6 @@ tr:hover td { background: var(--primary-light); }
 @media (max-width: 480px) {
   .live-options { grid-template-columns: 1fr; }
   .podium-place { width: 92px; }
-  .rank-grid { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; }
 }
 
 /* ===== Diversos ===== */
@@ -683,6 +693,116 @@ tr:hover td { background: var(--primary-light); }
 }
 .notice-info { background: var(--primary-light); color: var(--primary-dark); }
 .notice-warn { background: #fff6e5; color: #8a5b00; }
+
+/* ===== Reações emoji flutuantes (estilo Kahoot) ===== */
+#reaction-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 400;
+}
+.float-emoji {
+  position: absolute;
+  bottom: -70px;
+  animation: float-up var(--dur, 2.6s) ease-out forwards;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25));
+}
+@keyframes float-up {
+  0% { transform: translateY(0) scale(0.5) rotate(0deg); opacity: 0; }
+  12% { opacity: 1; }
+  100% { transform: translateY(-95vh) scale(1.25) rotate(var(--rot, -10deg)); opacity: 0; }
+}
+
+.reaction-bar {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.reaction-btn {
+  font-size: 1.45rem;
+  line-height: 1;
+  background: #f2f7f3;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 9px 13px;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.reaction-btn:hover { background: var(--primary-light); }
+.reaction-btn.reacted { animation: react-pop 0.45s ease; }
+@keyframes react-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.35) rotate(-8deg); }
+  100% { transform: scale(1); }
+}
+
+/* ===== Vinheta de introdução da questão (estilo Kahoot) ===== */
+.q-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 350;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  background: linear-gradient(135deg, var(--primary-dark), var(--primary) 60%, #12813d);
+  animation: intro-out 0.35s ease 2s forwards;
+}
+.q-intro-num {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--primary-dark);
+  font-size: 1.6rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: intro-pop 0.45s ease both;
+}
+.q-intro-type {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  animation: intro-pop 0.45s ease 0.12s both;
+}
+.q-intro-text {
+  color: #fff;
+  font-size: clamp(1.3rem, 4vw, 2.1rem);
+  font-weight: 800;
+  max-width: 850px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+  animation: intro-pop 0.45s ease 0.24s both;
+}
+@keyframes intro-pop {
+  0% { transform: scale(0.6) translateY(14px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+@keyframes intro-out {
+  to { opacity: 0; visibility: hidden; }
+}
+
+/* Alternativas surgem em cascata quando a questão aparece */
+.live-options .live-option { animation: opt-pop 0.4s ease both; }
+.live-options .live-option:nth-child(2) { animation-delay: 0.07s; }
+.live-options .live-option:nth-child(3) { animation-delay: 0.14s; }
+.live-options .live-option:nth-child(4) { animation-delay: 0.21s; }
+.live-options .live-option:nth-child(5) { animation-delay: 0.28s; }
+.live-options .live-option:nth-child(6) { animation-delay: 0.35s; }
+@keyframes opt-pop {
+  0% { transform: scale(0.92) translateY(10px); opacity: 0; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
 
 @media (max-width: 560px) {
   .brand small { display: none; }
