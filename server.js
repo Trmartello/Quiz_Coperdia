@@ -16,7 +16,8 @@ const ROOM_TTL_MS = 3 * 60 * 60 * 1000; // salas expiram após 3h
 const DEFAULT_TIME = 20;                // segundos por questão quando não definido
 const REVEAL_DELAY_MS = 800;            // margem após o fim do tempo
 
-const QUESTION_TYPES = ['quiz', 'tf', 'poll', 'wordcloud'];
+const QUESTION_TYPES = ['quiz', 'tf', 'short', 'poll', 'scale', 'wordcloud', 'slide'];
+const SCORED_TYPES = ['quiz', 'tf', 'short']; // tipos que valem nota/pontos
 const POINTS_MULTIPLIER = { standard: 1, double: 2, none: 0 };
 
 // Mesma lista do cliente (js/app.js) — avatares permitidos
@@ -86,9 +87,13 @@ function sanitizeQuiz(quiz) {
       options: [],
       optionImages: [],
       corrects: [],
+      answers: [],   // resposta curta: textos aceitos
       multi: false,
       timeLimit: null,
       maxAnswers: 1, // nuvem de palavras: quantas respostas cada participante pode enviar
+      scaleLeft: '', // escala: rótulos das pontas
+      scaleRight: '',
+      body: '',      // slide: texto de apoio
       pointsMultiplier: POINTS_MULTIPLIER[raw.points] !== undefined
         ? POINTS_MULTIPLIER[raw.points] : 1,
     };
@@ -122,6 +127,27 @@ function sanitizeQuiz(quiz) {
       q.options = ['Verdadeiro', 'Falso'];
       q.optionImages = [null, null];
     }
+    if (type === 'scale') {
+      q.options = ['1', '2', '3', '4', '5'];
+      q.optionImages = [null, null, null, null, null];
+      q.scaleLeft = String(raw.scaleLeft || '').slice(0, 40);
+      q.scaleRight = String(raw.scaleRight || '').slice(0, 40);
+    }
+    if (type === 'short') {
+      // respostas aceitas: até 10 textos, sem repetição (comparação sem maiúsculas)
+      const seen = new Set();
+      for (const a of (Array.isArray(raw.answers) ? raw.answers : [])) {
+        const text = String(a).trim().replace(/\s+/g, ' ').slice(0, 60);
+        if (!text || seen.has(text.toLowerCase())) continue;
+        seen.add(text.toLowerCase());
+        q.answers.push(text);
+        if (q.answers.length >= 10) break;
+      }
+      if (q.answers.length === 0) continue;
+    }
+    if (type === 'slide') {
+      q.body = String(raw.body || '').slice(0, 1000);
+    }
     if (type === 'quiz' || type === 'tf') {
       const corrects = Array.isArray(raw.corrects) ? raw.corrects : [];
       q.corrects = [...new Set(corrects)]
@@ -130,8 +156,8 @@ function sanitizeQuiz(quiz) {
       if (q.corrects.length === 0) continue;
       q.multi = type === 'quiz' && raw.multi === true;
       if (!q.multi && q.corrects.length > 1) q.corrects = [q.corrects[0]];
-    } else {
-      q.pointsMultiplier = 0; // enquete e nuvem de palavras não pontuam
+    } else if (!SCORED_TYPES.includes(type)) {
+      q.pointsMultiplier = 0; // enquete, escala, nuvem e slide não pontuam
       if (type === 'wordcloud') {
         const m = Math.round(Number(raw.maxAnswers));
         q.maxAnswers = m >= 1 && m <= 5 ? m : 1;
@@ -156,7 +182,7 @@ function createRoom(quiz) {
     hostToken: uid(),
     quiz,
     // nº de questões que valem nota (base do % de acerto)
-    scorableTotal: quiz.questions.filter(q => q.type === 'quiz' || q.type === 'tf').length,
+    scorableTotal: quiz.questions.filter(q => SCORED_TYPES.includes(q.type)).length,
     state: 'lobby', // lobby | question | reveal | podium
     questionIndex: -1,
     questionStartedAt: 0,
@@ -201,7 +227,7 @@ function currentQuestion(room) {
 
 function answerCounts(room) {
   const q = currentQuestion(room);
-  if (!q || q.type === 'wordcloud') return [];
+  if (!q || q.type === 'wordcloud' || q.type === 'short' || q.type === 'slide') return [];
   const counts = q.options.map(() => 0);
   for (const p of room.players.values()) {
     const a = p.answers.get(room.questionIndex);
@@ -246,7 +272,10 @@ function questionPublic(q) {
     type: q.type, text: q.text, image: q.image,
     options: q.options, optionImages: q.optionImages,
     multi: q.multi, maxAnswers: q.maxAnswers || 1,
+    scaleLeft: q.scaleLeft, scaleRight: q.scaleRight,
+    body: q.body,
     isScored: q.pointsMultiplier > 0,
+    // As respostas aceitas (short) NÃO vão aqui — só na revelação
   };
 }
 
@@ -278,13 +307,16 @@ function snapshotFor(room, conn) {
 
   if (room.state === 'reveal' && q) {
     base.question = questionPublic(q);
-    if (q.type === 'wordcloud') {
+    if (q.type === 'wordcloud' || q.type === 'short') {
       base.words = wordCloud(room);
     } else {
       base.counts = answerCounts(room);
     }
     if (q.type === 'quiz' || q.type === 'tf') {
       base.corrects = q.corrects;
+    }
+    if (q.type === 'short') {
+      base.acceptedAnswers = q.answers; // reveladas só depois que o tempo fecha
     }
     base.showRanking = room.quiz.showRanking;
     if (room.quiz.showRanking) {
@@ -381,7 +413,16 @@ function registerAnswer(room, player, body) {
 
   let value, correct = null;
 
-  if (q.type === 'wordcloud') {
+  if (q.type === 'slide') {
+    return { error: 'Slides não recebem resposta.', status: 400 };
+  }
+
+  if (q.type === 'short') {
+    const text = String(body.answer || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+    if (!text) return { error: 'Digite uma resposta.', status: 400 };
+    value = text;
+    correct = q.answers.some(a => a.toLowerCase() === text.toLowerCase());
+  } else if (q.type === 'wordcloud') {
     // Aceita uma string (clientes antigos) ou uma lista de até maxAnswers textos
     const raw = Array.isArray(body.answer) ? body.answer : [body.answer];
     const seen = new Set();
@@ -418,7 +459,7 @@ function registerAnswer(room, player, body) {
   const points = computePoints(correct === true, elapsedMs, limitMs, q.pointsMultiplier);
   player.answers.set(room.questionIndex, { value, ms: elapsedMs, correct, points });
   player.score += points;
-  if (q.type === 'quiz' || q.type === 'tf') {
+  if (SCORED_TYPES.includes(q.type)) {
     player.streak = correct ? player.streak + 1 : 0;
     if (correct) player.correctCount++;
   }
@@ -518,7 +559,10 @@ async function handleApi(req, res, urlPath, query) {
     } else if (cmd === 'reveal') {
       reveal(room);
     } else if (cmd === 'next') {
-      if (room.state !== 'reveal') return json(res, 409, { error: 'Ação indisponível agora.' });
+      // Slides avançam direto da exibição (sem passar pelo reveal)
+      const q = currentQuestion(room);
+      const slideShowing = room.state === 'question' && q && q.type === 'slide';
+      if (room.state !== 'reveal' && !slideShowing) return json(res, 409, { error: 'Ação indisponível agora.' });
       if (room.questionIndex + 1 >= room.quiz.questions.length) endGame(room);
       else startQuestion(room, room.questionIndex + 1);
     } else if (cmd === 'end') {

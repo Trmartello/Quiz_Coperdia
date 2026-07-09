@@ -7,12 +7,22 @@ const Store = (() => {
   const KEY_SEEDED = 'qc_seeded';
   const DEFAULT_PIN = '1234';
 
+  // Categorias do seletor de tipos (estilo Kahoot)
+  const TYPE_CATEGORIES = [
+    { id: 'know', label: 'Testar conhecimento' },
+    { id: 'opinion', label: 'Coletar opiniões' },
+    { id: 'slides', label: 'Slides' },
+  ];
+
   // Tipos de pergunta (estilo Kahoot)
   const QUESTION_TYPES = {
-    quiz: { label: 'Quiz', icon: '🟥', desc: 'Alternativas coloridas com resposta correta' },
-    tf: { label: 'Verdadeiro ou falso', icon: '⚖️', desc: 'Duas opções: verdadeiro ou falso' },
-    poll: { label: 'Enquete', icon: '📊', desc: 'Coleta opiniões — sem resposta certa e sem pontos' },
-    wordcloud: { label: 'Nuvem de palavras', icon: '☁️', desc: 'Resposta livre curta — forma uma nuvem no telão' },
+    quiz: { label: 'Quiz', icon: '🟥', cat: 'know', desc: 'Alternativas coloridas com resposta correta. Pontua pela velocidade.' },
+    tf: { label: 'Verdadeiro ou falso', icon: '⚖️', cat: 'know', desc: 'Deixe os participantes decidirem se a afirmação é verdadeira ou falsa.' },
+    short: { label: 'Resposta curta', icon: '⌨️', cat: 'know', desc: 'Os participantes digitam a resposta. Acerta quem escrever uma das respostas aceitas.' },
+    poll: { label: 'Enquete', icon: '📊', cat: 'opinion', desc: 'Coleta opiniões com alternativas — sem resposta certa e sem pontos.' },
+    scale: { label: 'Escala', icon: '📏', cat: 'opinion', desc: 'Os participantes avaliam de 1 a 5 (ex.: discordo → concordo). Sem pontos.' },
+    wordcloud: { label: 'Nuvem de palavras', icon: '☁️', cat: 'opinion', desc: 'Respostas livres curtas formam uma nuvem de palavras no telão.' },
+    slide: { label: 'Slide', icon: '🖼️', cat: 'slides', desc: 'Tela de conteúdo (título, texto e imagem) para explicar algo entre as questões.' },
   };
 
   const TIME_OPTIONS = [5, 10, 20, 30, 45, 60, 90, 120, 180, 240];
@@ -58,12 +68,16 @@ const Store = (() => {
   function newQuestion(data = {}) {
     return {
       id: uid(),
-      type: 'quiz',          // quiz | tf | poll | wordcloud
+      type: 'quiz',          // quiz | tf | short | poll | scale | wordcloud | slide
       text: '',
       options: ['', '', '', ''],
-      corrects: [0],         // índices corretos (quiz/tf); vazio em poll/wordcloud
+      corrects: [0],         // índices corretos (quiz/tf); vazio nos demais
+      answers: [],           // short: respostas aceitas (texto)
       multi: false,          // quiz: múltipla escolha (selecionar várias antes de enviar)
       maxAnswers: 1,         // wordcloud: quantas respostas cada participante pode enviar (1 a 5)
+      scaleLeft: '',         // scale: rótulo do 1 (ex.: Discordo totalmente)
+      scaleRight: '',        // scale: rótulo do 5 (ex.: Concordo totalmente)
+      body: '',              // slide: texto de apoio
       timeLimit: null,       // segundos; null = usa o padrão do treinamento
       points: 'standard',    // standard | double | none
       ...data,
@@ -82,11 +96,18 @@ const Store = (() => {
       if (!Array.isArray(n.corrects) || n.corrects.length !== 1) n.corrects = [0];
       n.multi = false;
     }
-    if (n.type === 'poll' || n.type === 'wordcloud') {
+    if (n.type === 'poll' || n.type === 'wordcloud' || n.type === 'scale' || n.type === 'slide') {
       n.corrects = [];
       n.multi = false;
       n.points = 'none';
     }
+    if (n.type === 'short') {
+      n.options = [];
+      n.corrects = [];
+      n.multi = false;
+      n.answers = (Array.isArray(n.answers) ? n.answers : []).map(a => String(a));
+    }
+    if (n.type === 'scale' || n.type === 'slide') n.options = [];
     if (n.type === 'wordcloud') {
       n.options = [];
       n.maxAnswers = Math.min(5, Math.max(1, Math.round(Number(n.maxAnswers)) || 1));
@@ -187,7 +208,7 @@ const Store = (() => {
 
   return {
     uid,
-    QUESTION_TYPES, TIME_OPTIONS, POINTS_OPTIONS,
+    QUESTION_TYPES, TYPE_CATEGORIES, TIME_OPTIONS, POINTS_OPTIONS,
     getTrainings, getTraining, upsertTraining, deleteTraining,
     newTraining, newQuestion,
     getResults, addResult, clearResults,

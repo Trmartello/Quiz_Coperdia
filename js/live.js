@@ -5,7 +5,10 @@ const Live = (() => {
   const SHAPES = ['▲', '◆', '●', '■', '★', '⬟'];
   // Mesma lista do servidor — reações rápidas permitidas
   const REACTIONS = ['👍','👏','❤️','😂','🤔','😮'];
-  const TYPE_LABELS = { quiz: '🎯 Quiz', tf: '⚖️ Verdadeiro ou falso', poll: '📊 Enquete', wordcloud: '☁️ Nuvem de palavras' };
+  const TYPE_LABELS = {
+    quiz: '🎯 Quiz', tf: '⚖️ Verdadeiro ou falso', short: '⌨️ Resposta curta',
+    poll: '📊 Enquete', scale: '📏 Escala', wordcloud: '☁️ Nuvem de palavras', slide: '🖼️ Slide',
+  };
 
   let es = null;            // EventSource ativo
   let countdown = null;     // interval do timer visual
@@ -184,6 +187,27 @@ const Live = (() => {
     return q.image ? `<div class="q-media ${size || ''}"><img src="${q.image}" alt=""></div>` : '';
   }
 
+  // Botões 1–5 da escala, com rótulos nas pontas
+  function scaleHtml(q, { tappable = false, counts = null } = {}) {
+    const tag = tappable ? 'button' : 'div';
+    return `
+      <div class="scale-wrap">
+        <div class="scale-row ${tappable ? 'tappable' : ''}">
+          ${q.options.map((o, i) => `
+            <${tag} class="scale-btn" data-index="${i}">
+              <span class="scale-num">${esc(o)}</span>
+              ${counts ? `<span class="count">${counts[i]}</span>` : ''}
+            </${tag}>`).join('')}
+        </div>
+        ${(q.scaleLeft || q.scaleRight) ? `
+          <div class="scale-labels">
+            <span>${esc(q.scaleLeft || '')}</span>
+            <span>${esc(q.scaleRight || '')}</span>
+          </div>` : ''}
+      </div>
+    `;
+  }
+
   function cloudHtml(words) {
     if (!words || words.length === 0) {
       return '<p class="muted" style="text-align:center;padding:24px 0">Nenhuma resposta recebida.</p>';
@@ -261,7 +285,9 @@ const Live = (() => {
       // A mesma questão só é desenhada uma vez — os snapshots seguintes atualizam apenas o contador
       if (!viewOnce(`hq:${s.questionIndex}`)) {
         const el = container.querySelector('#host-answered');
-        if (el) el.textContent = `✋ ${s.answeredCount}/${s.playersCount} responderam`;
+        if (el && s.question && s.question.type !== 'slide') {
+          el.textContent = `✋ ${s.answeredCount}/${s.playersCount} responderam`;
+        }
         return;
       }
       return drawHostQuestion(container, s);
@@ -369,27 +395,37 @@ const Live = (() => {
 
   function drawHostQuestion(container, s) {
     const q = s.question;
+    const isSlide = q.type === 'slide';
+    let body;
+    if (isSlide) {
+      body = `${q.body ? `<p class="slide-body">${esc(q.body)}</p>` : ''}`;
+    } else if (q.type === 'wordcloud' || q.type === 'short') {
+      body = `
+        <div class="empty-state" style="padding:26px 0">
+          <div class="big">${q.type === 'short' ? '⌨️' : '☁️'}</div>
+          <p class="muted">Os participantes estão digitando as respostas nos celulares...</p>
+          ${q.type === 'wordcloud' && (q.maxAnswers || 1) > 1 ? `<p class="muted">Cada participante pode enviar até ${q.maxAnswers} respostas.</p>` : ''}
+        </div>`;
+    } else if (q.type === 'scale') {
+      body = scaleHtml(q);
+    } else {
+      body = optionsHtml(q);
+    }
     container.innerHTML = `
       <div class="card">
         ${timerHeader(s, ` — PIN ${Host.pin}`)}
         <p class="question-text" style="font-size:1.5rem;text-align:center">${esc(q.text)}</p>
         ${mediaHtml(q)}
-        ${q.type === 'wordcloud' ? `
-          <div class="empty-state" style="padding:26px 0">
-            <div class="big">☁️</div>
-            <p class="muted">Os participantes estão digitando as respostas nos celulares...</p>
-            ${(q.maxAnswers || 1) > 1 ? `<p class="muted">Cada participante pode enviar até ${q.maxAnswers} respostas.</p>` : ''}
-          </div>
-        ` : optionsHtml(q)}
+        ${body}
         ${q.multi ? '<p class="muted" style="text-align:center;margin-top:10px">Múltipla escolha: selecione todas as corretas e envie</p>' : ''}
         <div class="quiz-header" style="margin-top:16px">
-          <span class="quiz-progress-text" id="host-answered">✋ ${s.answeredCount}/${s.playersCount} responderam</span>
-          <button class="btn btn-secondary" id="btn-reveal">Encerrar tempo</button>
+          <span class="quiz-progress-text" id="host-answered">${isSlide ? '' : `✋ ${s.answeredCount}/${s.playersCount} responderam`}</span>
+          <button class="btn ${isSlide ? 'btn-primary' : 'btn-secondary'}" id="btn-reveal">${isSlide ? (s.questionIndex + 1 >= s.totalQuestions ? '🏁 Ver pódio' : 'Avançar →') : 'Encerrar tempo'}</button>
         </div>
       </div>
     `;
     startCountdown(container, s.remainingMs, s.limitMs);
-    container.querySelector('#btn-reveal').addEventListener('click', () => hostCommand(container, 'reveal'));
+    container.querySelector('#btn-reveal').addEventListener('click', () => hostCommand(container, isSlide ? 'next' : 'reveal'));
     showQuestionIntro(s);
   }
 
@@ -399,6 +435,32 @@ const Live = (() => {
     let body;
     if (q.type === 'wordcloud') {
       body = cloudHtml(s.words);
+    } else if (q.type === 'short') {
+      body = `
+        <div class="accepted-answers">
+          <p class="muted" style="margin-bottom:6px">Resposta${(s.acceptedAnswers || []).length > 1 ? 's aceitas' : ' aceita'}:</p>
+          ${(s.acceptedAnswers || []).map(a => `<span class="pill pill-pass">✔ ${esc(a)}</span>`).join(' ')}
+        </div>
+        ${cloudHtml(s.words)}
+      `;
+    } else if (q.type === 'slide') {
+      body = q.body ? `<p class="slide-body">${esc(q.body)}</p>` : '';
+    } else if (q.type === 'scale') {
+      const total = (s.counts || []).reduce((a, b) => a + b, 0) || 1;
+      body = `
+        ${scaleHtml(q, { counts: s.counts })}
+        <div class="dist-bars">
+          ${q.options.map((o, i) => {
+            const pct = Math.round((s.counts[i] / total) * 100);
+            return `
+              <div class="dist-col">
+                <span class="dist-count">${pct}%</span>
+                <div class="dist-bar green" style="height:${Math.max(6, (s.counts[i] / total) * 90)}px"></div>
+                <span class="dist-shape green">${esc(o)} <b>${s.counts[i]}</b></span>
+              </div>`;
+          }).join('')}
+        </div>
+      `;
     } else {
       const total = (s.counts || []).reduce((a, b) => a + b, 0) || 1;
       body = `
@@ -418,7 +480,7 @@ const Live = (() => {
         </div>
       `;
     }
-    const scored = q.type === 'quiz' || q.type === 'tf';
+    const scored = q.type === 'quiz' || q.type === 'tf' || q.type === 'short';
     const deltaBadge = d => d > 0
       ? `<span class="rank-delta up">▲ ${d}</span>`
       : d < 0 ? `<span class="rank-delta down">▼ ${-d}</span>` : '<span class="rank-delta">—</span>';
@@ -433,7 +495,8 @@ const Live = (() => {
           ${body}
         </div>
         <div class="card reveal-side">
-          ${!scored ? '<p class="muted">Esta pergunta não vale pontos — obrigado pelas opiniões! 💬</p>'
+          ${q.type === 'slide' ? '<p class="muted">Slide de conteúdo — sem respostas. 📖</p>'
+            : !scored ? '<p class="muted">Esta pergunta não vale pontos — obrigado pelas opiniões! 💬</p>'
             : s.showRanking ? `
             <h2 style="font-size:1.05rem">🏆 Ranking parcial</h2>
             <div class="rank-grid">
@@ -760,6 +823,68 @@ const Live = (() => {
     const q = s.question;
     showQuestionIntro(s); // vinheta em todos os tipos de questão
 
+    // Slide: só acompanha o telão (sem resposta)
+    if (q.type === 'slide') {
+      container.innerHTML = `
+        <div class="card live-hero">
+          ${timerHeader(s)}
+          <div class="big" style="font-size:3rem">👀</div>
+          <h1 style="font-size:1.3rem">${esc(q.text)}</h1>
+          <p class="muted">Acompanhe o conteúdo no telão.</p>
+          ${reactionBarHtml()}
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      wireReactionBar(container);
+      return;
+    }
+
+    // Resposta curta: campo de texto — acerta quem digitar uma resposta aceita
+    if (q.type === 'short') {
+      container.innerHTML = `
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          <div class="field">
+            <input type="text" class="short-answer" maxlength="60" placeholder="Digite sua resposta" autocomplete="off">
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-send">Enviar resposta</button>
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      const input = container.querySelector('.short-answer');
+      const send = () => {
+        const text = input.value.trim();
+        if (!text) { input.focus(); return; }
+        sendAnswer(container, s, text);
+      };
+      container.querySelector('#btn-send').addEventListener('click', send);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+      input.focus();
+      return;
+    }
+
+    // Escala 1–5: um toque no número responde
+    if (q.type === 'scale') {
+      container.innerHTML = `
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          ${scaleHtml(q, { tappable: true })}
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      container.querySelectorAll('.scale-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          container.querySelectorAll('.scale-btn').forEach(b => { b.disabled = true; });
+          sendAnswer(container, s, Number(btn.dataset.index));
+        });
+      });
+      return;
+    }
+
     // Nuvem de palavras: campos de texto livre (até q.maxAnswers respostas por participante)
     if (q.type === 'wordcloud') {
       const max = Math.max(1, q.maxAnswers || 1);
@@ -845,14 +970,16 @@ const Live = (() => {
   function drawPlayerReveal(container, s) {
     if (countdown) clearInterval(countdown);
     const me = s.me || {};
-    const scored = s.question.type === 'quiz' || s.question.type === 'tf';
+    const qType = s.question.type;
+    const scored = qType === 'quiz' || qType === 'tf' || qType === 'short';
 
     if (!scored) {
+      const isSlide = qType === 'slide';
       container.innerHTML = `
         <div class="card live-hero">
-          <div class="big" style="font-size:3rem">${me.answered ? '💬' : '⏰'}</div>
-          <h1>${me.answered ? 'Obrigado pela sua opinião!' : 'Tempo esgotado!'}</h1>
-          <p class="muted">Veja as respostas de todos no telão.</p>
+          <div class="big" style="font-size:3rem">${isSlide ? '👀' : me.answered ? '💬' : '⏰'}</div>
+          <h1>${isSlide ? 'Vamos continuar!' : me.answered ? 'Obrigado pela sua opinião!' : 'Tempo esgotado!'}</h1>
+          <p class="muted">${isSlide ? 'Aguarde o instrutor avançar.' : 'Veja as respostas de todos no telão.'}</p>
           ${reactionBarHtml()}
         </div>
       `;

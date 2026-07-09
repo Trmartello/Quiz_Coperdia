@@ -145,6 +145,14 @@ const Admin = (() => {
               ${esc(o)}${q.corrects.includes(oi) ? ' ✔' : ''}
             </li>`).join('')}
         </ol>`;
+    } else if (q.type === 'short') {
+      detail = `<p class="muted" style="margin-top:6px">Respostas aceitas:
+        ${q.answers.map(a => `<span class="pill pill-pass">✔ ${esc(a)}</span>`).join(' ')}</p>`;
+    } else if (q.type === 'scale') {
+      detail = `<p class="muted" style="margin-top:6px">Escala de 1
+        ${q.scaleLeft ? `(${esc(q.scaleLeft)})` : ''} a 5 ${q.scaleRight ? `(${esc(q.scaleRight)})` : ''} — sem pontos.</p>`;
+    } else if (q.type === 'slide') {
+      detail = `<p class="muted" style="margin-top:6px">${esc((q.body || '').slice(0, 120)) || 'Slide de conteúdo — sem respostas.'}</p>`;
     } else {
       const n = q.maxAnswers || 1;
       detail = `<p class="muted" style="margin-top:6px">Resposta livre — forma uma nuvem de palavras no telão
@@ -244,7 +252,9 @@ const Admin = (() => {
         }
       });
       card.querySelector('[data-action="add-q"]').addEventListener('click', () => {
-        openQuestionModal(training(), null, () => { expandedId = id; renderPanel(container); });
+        openTypePicker(training(), type => {
+          openQuestionModal(training(), null, () => { expandedId = id; renderPanel(container); }, type);
+        });
       });
       card.querySelectorAll('.question-card').forEach(qc => {
         const t = training();
@@ -332,19 +342,105 @@ const Admin = (() => {
     modal.querySelector('#t-name').focus();
   }
 
+  /* ---------- Modal: escolher o tipo da nova questão (estilo Kahoot) ---------- */
+
+  // Miniatura ilustrativa de cada tipo, usada no balão de pré-visualização
+  function typePreviewHtml(key) {
+    if (key === 'quiz') return `
+      <div class="tp-mini"><div class="tp-media">🖼️</div>
+        <div class="tp-opts"><span class="tp-opt red"></span><span class="tp-opt blue"></span><span class="tp-opt yellow"></span><span class="tp-opt green"></span></div></div>`;
+    if (key === 'tf') return `
+      <div class="tp-mini"><div class="tp-media">🖼️</div>
+        <div class="tp-opts"><span class="tp-opt blue">✔</span><span class="tp-opt red">✖</span></div></div>`;
+    if (key === 'short') return `
+      <div class="tp-mini"><div class="tp-media">🖼️</div><div class="tp-input">| digite a resposta…</div></div>`;
+    if (key === 'poll') return `
+      <div class="tp-mini"><div class="tp-bars"><i style="height:26px"></i><i style="height:14px"></i><i style="height:20px"></i></div></div>`;
+    if (key === 'scale') return `
+      <div class="tp-mini"><div class="tp-scale">${[1, 2, 3, 4, 5].map(n => `<span>${n}</span>`).join('')}</div></div>`;
+    if (key === 'wordcloud') return `
+      <div class="tp-mini"><div class="tp-cloud"><b>equipe</b> <span>foco</span> <b style="font-size:1.1em">união</b> <span>meta</span></div></div>`;
+    return `
+      <div class="tp-mini"><div class="tp-slide"><strong>Título</strong><span></span><span style="width:70%"></span></div></div>`;
+  }
+
+  function openTypePicker(training, onPick) {
+    const modal = openModal(`
+      <h2>Adicionar questão</h2>
+      <p class="subtitle" style="margin-bottom:14px">Escolha o tipo — passe o mouse para ver como funciona.</p>
+      ${Store.TYPE_CATEGORIES.map(cat => `
+        <p class="type-cat">${cat.label}</p>
+        <div class="type-grid">
+          ${Object.entries(Store.QUESTION_TYPES).filter(([, v]) => v.cat === cat.id).map(([key, v]) => `
+            <button type="button" class="type-tile" data-type="${key}">
+              <span class="type-tile-icon">${v.icon}</span>
+              <span class="type-tile-label">${v.label}</span>
+              <span class="type-tip">
+                ${typePreviewHtml(key)}
+                <strong>${v.icon} ${v.label}</strong>
+                <small>${v.desc}</small>
+              </span>
+            </button>`).join('')}
+        </div>`).join('')}
+    `, { wide: true });
+
+    modal.querySelectorAll('.type-tile').forEach(tile => {
+      tile.addEventListener('click', () => {
+        closeModal();
+        onPick(tile.dataset.type);
+      });
+    });
+  }
+
+  // Ajusta os campos da questão ao trocar/definir o tipo
+  function applyTypeDefaults(q, type) {
+    q.type = type;
+    if (type === 'tf') {
+      q.options = ['Verdadeiro', 'Falso'];
+      q.optionImages = [null, null];
+      q.corrects = [0];
+      q.multi = false;
+      if (q.points === 'none') q.points = 'standard';
+    } else if (type === 'short') {
+      q.options = [];
+      q.optionImages = [];
+      q.corrects = [];
+      q.multi = false;
+      if (!Array.isArray(q.answers)) q.answers = [];
+      if (q.points === 'none') q.points = 'standard';
+    } else if (type === 'wordcloud' || type === 'scale' || type === 'slide') {
+      q.options = [];
+      q.optionImages = [];
+      q.corrects = [];
+      q.multi = false;
+      q.points = 'none';
+      if (type === 'wordcloud') q.maxAnswers = q.maxAnswers || 1;
+    } else if (type === 'poll') {
+      if (q.options.length < 2) { q.options = ['', '']; q.optionImages = [null, null]; }
+      q.corrects = [];
+      q.multi = false;
+      q.points = 'none';
+    } else if (type === 'quiz') {
+      if (q.options.length < 2) { q.options = ['', '', '', '']; q.optionImages = [null, null, null, null]; }
+      if (q.corrects.length === 0) q.corrects = [0];
+      if (q.points === 'none') q.points = 'standard';
+    }
+  }
+
   /* ---------- Modal: questão (estilo Kahoot) ---------- */
-  function openQuestionModal(training, question, onSave) {
+  function openQuestionModal(training, question, onSave, initialType) {
     const isNew = !question;
     // Trabalha numa cópia para só persistir no salvar
     const q = JSON.parse(JSON.stringify(question || Store.newQuestion()));
     if (!Array.isArray(q.optionImages)) q.optionImages = q.options.map(() => null);
+    if (isNew && initialType) applyTypeDefaults(q, initialType);
 
     const modal = openModal('', { wide: true });
 
     const draw = () => {
       const type = q.type;
       const hasOptions = type === 'quiz' || type === 'poll';
-      const scored = type === 'quiz' || type === 'tf';
+      const scored = type === 'quiz' || type === 'tf' || type === 'short';
 
       modal.innerHTML = `
         <button class="modal-close" aria-label="Fechar">✕</button>
@@ -367,6 +463,45 @@ const Admin = (() => {
               <div class="notice notice-info">
                 ☁️ Os participantes digitam respostas curtas e livres (palavras ou frases). As respostas
                 formam uma nuvem de palavras no telão. Não há resposta certa nem pontos.
+              </div>` : ''}
+
+            ${type === 'short' ? `
+              <label>Respostas aceitas — acerta quem digitar uma delas</label>
+              <div id="q-answers" style="margin-top:8px">
+                ${[...q.answers, ''].slice(0, 10).map((a, i) => `
+                  <div class="option-edit-row">
+                    <span class="opt-chip green">✔</span>
+                    <input type="text" data-ans="${i}" value="${esc(a)}" maxlength="60"
+                           placeholder="${i === 0 ? 'Resposta aceita (obrigatória)' : 'Outra forma de escrever (opcional)'}">
+                  </div>`).join('')}
+              </div>
+              ${q.answers.length < 9 ? '<button class="btn btn-ghost btn-sm" id="btn-add-ans">+ Adicionar outra resposta aceita</button>' : ''}
+              <p class="muted" style="font-size:0.78rem;margin-top:6px">A comparação ignora maiúsculas/minúsculas e espaços extras.</p>
+            ` : ''}
+
+            ${type === 'scale' ? `
+              <div class="notice notice-info">
+                📏 Os participantes escolhem uma nota de <strong>1 a 5</strong>. Dê significado às pontas abaixo (opcional).
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="q-scale-left">Rótulo do 1</label>
+                  <input type="text" id="q-scale-left" maxlength="40" value="${esc(q.scaleLeft || '')}" placeholder="Ex.: Discordo totalmente">
+                </div>
+                <div class="field">
+                  <label for="q-scale-right">Rótulo do 5</label>
+                  <input type="text" id="q-scale-right" maxlength="40" value="${esc(q.scaleRight || '')}" placeholder="Ex.: Concordo totalmente">
+                </div>
+              </div>` : ''}
+
+            ${type === 'slide' ? `
+              <div class="notice notice-info">
+                🖼️ Slide de conteúdo: use o enunciado como <strong>título</strong> e o texto abaixo para explicar.
+                Os participantes acompanham pelo telão; ninguém responde.
+              </div>
+              <div class="field">
+                <label for="q-body">Texto do slide (opcional)</label>
+                <textarea id="q-body" rows="4" maxlength="1000" placeholder="Conteúdo exibido no telão">${esc(q.body || '')}</textarea>
               </div>` : ''}
 
             ${type === 'tf' ? `
@@ -479,34 +614,28 @@ const Admin = (() => {
         if (pointsEl) q.points = pointsEl.value;
         const maxEl = modal.querySelector('#q-max');
         if (maxEl) q.maxAnswers = Number(maxEl.value) || 1;
+        const ansEls = [...modal.querySelectorAll('[data-ans]')];
+        if (ansEls.length) q.answers = ansEls.map(el => el.value.trim()).filter(Boolean);
+        const slEl = modal.querySelector('#q-scale-left');
+        if (slEl) q.scaleLeft = slEl.value.trim();
+        const srEl = modal.querySelector('#q-scale-right');
+        if (srEl) q.scaleRight = srEl.value.trim();
+        const bodyEl = modal.querySelector('#q-body');
+        if (bodyEl) q.body = bodyEl.value.trim();
       };
 
       /* --- troca de tipo --- */
       modal.querySelector('#q-type').addEventListener('change', e => {
         sync();
-        q.type = e.target.value;
-        if (q.type === 'tf') {
-          q.options = ['Verdadeiro', 'Falso'];
-          q.optionImages = [null, null];
-          q.corrects = [0];
-          q.multi = false;
-        } else if (q.type === 'wordcloud') {
-          q.options = [];
-          q.optionImages = [];
-          q.corrects = [];
-          q.multi = false;
-          q.points = 'none';
-          q.maxAnswers = q.maxAnswers || 1;
-        } else if (q.type === 'poll') {
-          if (q.options.length < 2) { q.options = ['', '']; q.optionImages = [null, null]; }
-          q.corrects = [];
-          q.multi = false;
-          q.points = 'none';
-        } else if (q.type === 'quiz') {
-          if (q.options.length < 2) { q.options = ['', '', '', '']; q.optionImages = [null, null, null, null]; }
-          if (q.corrects.length === 0) q.corrects = [0];
-          if (q.points === 'none') q.points = 'standard';
-        }
+        applyTypeDefaults(q, e.target.value);
+        draw();
+      });
+
+      /* --- respostas aceitas (resposta curta) --- */
+      const addAns = modal.querySelector('#btn-add-ans');
+      if (addAns) addAns.addEventListener('click', () => {
+        sync();
+        q.answers.push('');
         draw();
       });
 
@@ -606,6 +735,9 @@ const Admin = (() => {
             q.optionImages = filled.map(o => o.image);
           }
           if (q.type === 'quiz' && q.corrects.length === 0) return fail('Marque a alternativa correta.');
+        }
+        if (q.type === 'short' && q.answers.length === 0) {
+          return fail('Informe ao menos uma resposta aceita.');
         }
         q.text = q.text.trim();
         const saved = Store.getTraining(training.id);
