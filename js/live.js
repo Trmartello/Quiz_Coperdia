@@ -56,12 +56,58 @@ const Live = (() => {
     countdown = setInterval(tick, 250);
   }
 
-  function timerBar(remainingMs, limitMs) {
+  function timerHeader(s, extra) {
     return `
-      <div class="quiz-header" style="justify-content:flex-end">
-        <span class="timer">⏱️ <span id="live-timer-value">${Math.ceil(remainingMs / 1000)}</span>s</span>
+      <div class="quiz-header">
+        <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions}${extra || ''}</span>
+        <span class="timer">⏱️ <span id="live-timer-value">${Math.ceil(s.remainingMs / 1000)}</span>s</span>
       </div>
-      <div class="timer-track"><div class="timer-fill" id="live-timer-fill" style="width:${(remainingMs / limitMs) * 100}%"></div></div>
+      <div class="timer-track"><div class="timer-fill" id="live-timer-fill" style="width:${(s.remainingMs / s.limitMs) * 100}%"></div></div>
+    `;
+  }
+
+  // Botões/faixas coloridas das alternativas (telão e celular)
+  function optionsHtml(q, { tappable = false, corrects = null, counts = null, selected = [] } = {}) {
+    const tf = q.type === 'tf';
+    return `
+      <div class="live-options ${tappable ? 'tappable' : ''} ${tf ? 'tf' : ''}">
+        ${q.options.map((o, i) => {
+          const color = tf ? (i === 0 ? 'blue' : 'red') : COLORS[i];
+          const shape = tf ? (i === 0 ? '✔' : '✖') : SHAPES[i];
+          const isCorrect = corrects && corrects.includes(i);
+          const dim = corrects && !isCorrect ? 'is-dim' : '';
+          const sel = selected.includes(i) ? 'is-selected' : '';
+          const tag = tappable ? 'button' : 'div';
+          const img = q.optionImages && q.optionImages[i];
+          return `
+            <${tag} class="live-option ${color} ${corrects ? (isCorrect ? 'is-correct' : dim) : ''} ${sel}" data-index="${i}">
+              <span class="shape">${shape}</span>
+              ${img ? `<img class="opt-img" src="${img}" alt="">` : ''}
+              <span style="flex:1">${esc(o)} ${isCorrect ? '✔' : ''}</span>
+              ${counts ? `<span class="count">${counts[i]}</span>` : ''}
+            </${tag}>`;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  // Imagem de mídia da pergunta (quando cadastrada)
+  function mediaHtml(q, size) {
+    return q.image ? `<div class="q-media ${size || ''}"><img src="${q.image}" alt=""></div>` : '';
+  }
+
+  function cloudHtml(words) {
+    if (!words || words.length === 0) {
+      return '<p class="muted" style="text-align:center;padding:24px 0">Nenhuma resposta recebida.</p>';
+    }
+    const max = words[0].count;
+    return `
+      <div class="word-cloud">
+        ${words.map((w, i) => {
+          const scale = 0.9 + (w.count / max) * 1.6;
+          return `<span class="cloud-word c${i % 5}" style="font-size:${scale.toFixed(2)}rem">${esc(w.text)}${w.count > 1 ? `<small>×${w.count}</small>` : ''}</span>`;
+        }).join('')}
+      </div>
     `;
   }
 
@@ -129,14 +175,45 @@ const Live = (() => {
     if (s.state === 'podium') return drawHostPodium(container, s);
   }
 
+  function joinUrl() {
+    return `${location.origin}${location.pathname}#/join/${Host.pin}`;
+  }
+
+  function drawQr(container) {
+    const el = container.querySelector('#qr-box');
+    if (!el || typeof qrcode !== 'function') return;
+    try {
+      const qr = qrcode(0, 'M'); // 0 = tamanho automático
+      qr.addData(joinUrl());
+      qr.make();
+      el.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+    } catch {
+      el.style.display = 'none';
+    }
+  }
+
   function drawHostLobby(container, s) {
-    const joinUrl = `${location.origin}${location.pathname}`;
+    const url = joinUrl();
+    const shareText = `Participe do quiz "${s.quizName}"! Acesse ${url} ou entre em ${location.host} com o PIN ${Host.pin}.`;
     container.innerHTML = `
       <div class="card live-hero">
         <p class="muted">${esc(s.quizName)}</p>
-        <h1 style="margin:6px 0">Entre em <strong>${esc(joinUrl.replace(/^https?:\/\//, ''))}</strong></h1>
-        <p class="muted">e digite o PIN do jogo:</p>
-        <div class="game-pin">${Host.pin}</div>
+        <div class="lobby-grid">
+          <div>
+            <h1 style="margin:6px 0">Entre em <strong>${esc(location.host)}</strong></h1>
+            <p class="muted">e digite o PIN do jogo:</p>
+            <div class="game-pin">${Host.pin}</div>
+            <div class="btn-row" style="justify-content:center">
+              <button class="btn btn-secondary btn-sm" id="btn-copy">📋 Copiar link</button>
+              <a class="btn btn-whatsapp btn-sm" id="btn-whats" target="_blank" rel="noopener"
+                 href="https://wa.me/?text=${encodeURIComponent(shareText)}">💬 WhatsApp</a>
+            </div>
+          </div>
+          <div class="qr-wrap">
+            <div id="qr-box"></div>
+            <p class="muted" style="font-size:0.78rem">Aponte a câmera para entrar direto</p>
+          </div>
+        </div>
         <p class="muted" id="conn-note"></p>
       </div>
       <div class="card">
@@ -151,25 +228,35 @@ const Live = (() => {
         </div>
       </div>
     `;
+    drawQr(container);
     container.querySelector('#btn-start').addEventListener('click', () => hostCommand(container, 'start'));
+    container.querySelector('#btn-copy').addEventListener('click', async e => {
+      try { await navigator.clipboard.writeText(url); } catch {
+        const inp = document.createElement('input');
+        inp.value = url; document.body.appendChild(inp); inp.select();
+        document.execCommand('copy'); inp.remove();
+      }
+      e.target.textContent = '✔ Copiado!';
+      setTimeout(() => { e.target.textContent = '📋 Copiar link'; }, 1800);
+    });
   }
 
   function drawHostQuestion(container, s) {
+    const q = s.question;
     container.innerHTML = `
       <div class="card">
-        <div class="quiz-header">
-          <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions} — PIN ${Host.pin}</span>
+        ${timerHeader(s, ` — PIN ${Host.pin}`)}
+        <p class="question-text" style="font-size:1.5rem;text-align:center">${esc(q.text)}</p>
+        ${mediaHtml(q)}
+        ${q.type === 'wordcloud' ? `
+          <div class="empty-state" style="padding:26px 0">
+            <div class="big">☁️</div>
+            <p class="muted">Os participantes estão digitando as respostas nos celulares...</p>
+          </div>
+        ` : optionsHtml(q)}
+        ${q.multi ? '<p class="muted" style="text-align:center;margin-top:10px">Múltipla escolha: selecione todas as corretas e envie</p>' : ''}
+        <div class="quiz-header" style="margin-top:16px">
           <span class="quiz-progress-text">✋ ${s.answeredCount}/${s.playersCount} responderam</span>
-        </div>
-        ${timerBar(s.remainingMs, s.limitMs)}
-        <p class="question-text" style="font-size:1.5rem;text-align:center">${esc(s.question.text)}</p>
-        <div class="live-options">
-          ${s.question.options.map((o, i) => `
-            <div class="live-option ${COLORS[i]}">
-              <span class="shape">${SHAPES[i]}</span><span>${esc(o)}</span>
-            </div>`).join('')}
-        </div>
-        <div class="btn-row" style="justify-content:flex-end">
           <button class="btn btn-secondary" id="btn-reveal">Encerrar tempo</button>
         </div>
       </div>
@@ -180,35 +267,47 @@ const Live = (() => {
 
   function drawHostReveal(container, s) {
     if (countdown) clearInterval(countdown);
-    const totalAnswers = s.counts.reduce((a, b) => a + b, 0) || 1;
+    const q = s.question;
+    let body;
+    if (q.type === 'wordcloud') {
+      body = cloudHtml(s.words);
+    } else {
+      const total = (s.counts || []).reduce((a, b) => a + b, 0) || 1;
+      body = `
+        ${optionsHtml(q, { corrects: s.corrects || null, counts: s.counts })}
+        <div class="dist-bars">
+          ${q.options.map((o, i) => {
+            const color = q.type === 'tf' ? (i === 0 ? 'blue' : 'red') : COLORS[i];
+            return `<div class="dist-bar ${color}" style="height:${Math.max(6, (s.counts[i] / total) * 90)}px" title="${s.counts[i]}"></div>`;
+          }).join('')}
+        </div>
+      `;
+    }
+    const scored = q.type === 'quiz' || q.type === 'tf';
+    const deltaBadge = d => d > 0
+      ? `<span class="rank-delta up">▲ ${d}</span>`
+      : d < 0 ? `<span class="rank-delta down">▼ ${-d}</span>` : '<span class="rank-delta">—</span>';
     container.innerHTML = `
       <div class="card">
         <div class="quiz-header">
-          <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions} — resultado</span>
+          <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions} — ${scored ? 'resultado' : 'respostas'}</span>
         </div>
-        <p class="question-text" style="font-size:1.3rem;text-align:center">${esc(s.question.text)}</p>
-        <div class="live-options">
-          ${s.question.options.map((o, i) => `
-            <div class="live-option ${COLORS[i]} ${i === s.correct ? 'is-correct' : 'is-dim'}">
-              <span class="shape">${SHAPES[i]}</span>
-              <span style="flex:1">${esc(o)} ${i === s.correct ? '✔' : ''}</span>
-              <span class="count">${s.counts[i]}</span>
-            </div>`).join('')}
-        </div>
-        <div class="dist-bars">
-          ${s.question.options.map((o, i) => `
-            <div class="dist-bar ${COLORS[i]}" style="height:${Math.max(6, (s.counts[i] / totalAnswers) * 90)}px" title="${s.counts[i]}"></div>
-          `).join('')}
-        </div>
+        <p class="question-text" style="font-size:1.3rem;text-align:center">${esc(q.text)}</p>
+        ${mediaHtml(q, 'small')}
+        ${body}
       </div>
       <div class="card">
-        <h2>🏆 Ranking parcial</h2>
-        ${s.leaderboard.map(p => `
-          <div class="rank-row">
-            <span class="rank-pos">${p.rank}º</span>
-            <span class="rank-name">${esc(p.name)}</span>
-            <span class="rank-score">${p.score} pts</span>
-          </div>`).join('')}
+        ${!scored ? '<p class="muted">Esta pergunta não vale pontos — obrigado pelas opiniões! 💬</p>'
+          : s.showRanking ? `
+          <h2>🏆 Ranking parcial</h2>
+          ${s.leaderboard.map(p => `
+            <div class="rank-row">
+              <span class="rank-pos">${p.rank}º</span>
+              ${deltaBadge(p.delta)}
+              <span class="rank-name">${esc(p.name)}</span>
+              <span class="rank-score">${p.score} pts</span>
+            </div>`).join('')}
+        ` : '<p class="muted">Ranking oculto durante o jogo — a classificação aparece no pódio final. 🤫</p>'}
         <div class="btn-row" style="justify-content:flex-end">
           <button class="btn btn-primary" id="btn-next">${s.isLast ? '🏁 Ver pódio' : 'Próxima questão →'}</button>
         </div>
@@ -229,7 +328,7 @@ const Live = (() => {
           trainingName: s.quizName + ' (ao vivo)',
           participant: r.name,
           correct: r.correct,
-          total: s.totalQuestions,
+          total: s.scorableTotal,
           score: r.percent,
           passed: r.passed,
           durationSec: 0,
@@ -256,7 +355,11 @@ const Live = (() => {
       </div>
       <div class="card">
         <h2>Resultado final (${s.results.length} participantes)</h2>
-        <p class="muted" style="margin-bottom:12px">Aprovação a partir de ${s.passScore}% de acerto. Resultados gravados na aba Resultados da administração.</p>
+        <p class="muted" style="margin-bottom:12px">
+          ${s.scorableTotal > 0
+            ? `Aprovação a partir de ${s.passScore}% de acerto nas ${s.scorableTotal} questões que valem nota. Resultados gravados na aba Resultados da administração.`
+            : 'Este quiz não possui questões que valem nota.'}
+        </p>
         <div class="table-wrap">
           <table>
             <thead><tr><th>#</th><th>Participante</th><th>Pontos</th><th>Acertos</th><th>Nota</th><th>Situação</th></tr></thead>
@@ -266,9 +369,11 @@ const Live = (() => {
                   <td>${r.rank}º</td>
                   <td>${esc(r.name)}</td>
                   <td>${r.score}</td>
-                  <td>${r.correct}/${s.totalQuestions}</td>
-                  <td><strong>${r.percent}%</strong></td>
-                  <td><span class="pill ${r.passed ? 'pill-pass' : 'pill-fail'}">${r.passed ? 'Aprovado' : 'Reprovado'}</span></td>
+                  <td>${r.correct}/${s.scorableTotal}</td>
+                  <td><strong>${r.percent === null ? '—' : r.percent + '%'}</strong></td>
+                  <td>${r.passed === null
+                    ? '<span class="pill">Participou</span>'
+                    : `<span class="pill ${r.passed ? 'pill-pass' : 'pill-fail'}">${r.passed ? 'Aprovado' : 'Reprovado'}</span>`}</td>
                 </tr>`).join('')}
             </tbody>
           </table>
@@ -336,45 +441,100 @@ const Live = (() => {
     `;
   }
 
+  async function sendAnswer(container, s, answer) {
+    try {
+      await api(`/api/rooms/${Player.pin}/answer`, {
+        playerId: Player.id,
+        questionIndex: s.questionIndex,
+        answer,
+      });
+      drawWaiting(container);
+    } catch { /* fora do tempo — o próximo snapshot resolve a tela */ }
+  }
+
+  function drawWaiting(container) {
+    container.innerHTML = `
+      <div class="card live-hero">
+        <div class="big" style="font-size:3rem">⚡</div>
+        <h1>Resposta enviada!</h1>
+        <p class="muted">Aguardando os demais participantes...</p>
+      </div>
+    `;
+  }
+
   function drawPlayerQuestion(container, s) {
-    // Já respondeu? Tela de espera.
-    if (s.myAnswer != null) {
+    if (s.answered) return drawWaiting(container);
+    const q = s.question;
+
+    // Nuvem de palavras: campo de texto livre
+    if (q.type === 'wordcloud') {
       container.innerHTML = `
-        <div class="card live-hero">
-          <div class="big" style="font-size:3rem">⚡</div>
-          <h1>Resposta enviada!</h1>
-          <p class="muted">Aguardando os demais participantes...</p>
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          <div class="field">
+            <input type="text" id="cloud-answer" maxlength="30" placeholder="Digite sua resposta (1 a 3 palavras)" autocomplete="off">
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-send">Enviar resposta</button>
         </div>
       `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      const input = container.querySelector('#cloud-answer');
+      const send = () => {
+        const text = input.value.trim();
+        if (!text) { input.focus(); return; }
+        sendAnswer(container, s, text);
+      };
+      container.querySelector('#btn-send').addEventListener('click', send);
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+      input.focus();
       return;
     }
+
+    // Quiz múltipla escolha: seleciona várias e envia
+    if (q.multi) {
+      container.innerHTML = `
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          <p class="muted" style="margin-bottom:10px">Selecione todas as corretas e toque em Enviar.</p>
+          ${optionsHtml(q, { tappable: true })}
+          <button class="btn btn-primary btn-lg" id="btn-send" style="margin-top:14px" disabled>Enviar</button>
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      const selected = new Set();
+      const sendBtn = container.querySelector('#btn-send');
+      container.querySelectorAll('.live-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const i = Number(btn.dataset.index);
+          if (selected.has(i)) { selected.delete(i); btn.classList.remove('is-selected'); }
+          else { selected.add(i); btn.classList.add('is-selected'); }
+          sendBtn.disabled = selected.size === 0;
+        });
+      });
+      sendBtn.addEventListener('click', () => {
+        sendAnswer(container, s, [...selected].sort((a, b) => a - b));
+      });
+      return;
+    }
+
+    // Quiz seleção simples / verdadeiro-falso / enquete: um toque responde
     container.innerHTML = `
       <div class="card">
-        <div class="quiz-header">
-          <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions}</span>
-          <span class="timer">⏱️ <span id="live-timer-value">${Math.ceil(s.remainingMs / 1000)}</span>s</span>
-        </div>
-        <div class="timer-track"><div class="timer-fill" id="live-timer-fill" style="width:${(s.remainingMs / s.limitMs) * 100}%"></div></div>
-        <p class="question-text">${esc(s.question.text)}</p>
-        <div class="live-options tappable">
-          ${s.question.options.map((o, i) => `
-            <button class="live-option ${COLORS[i]}" data-answer="${i}">
-              <span class="shape">${SHAPES[i]}</span><span>${esc(o)}</span>
-            </button>`).join('')}
-        </div>
+        ${timerHeader(s)}
+        <p class="question-text">${esc(q.text)}</p>
+        ${mediaHtml(q, 'small')}
+        ${optionsHtml(q, { tappable: true })}
       </div>
     `;
     startCountdown(container, s.remainingMs, s.limitMs);
     container.querySelectorAll('.live-option').forEach(btn => {
-      btn.addEventListener('click', async () => {
+      btn.addEventListener('click', () => {
         container.querySelectorAll('.live-option').forEach(b => { b.disabled = true; });
-        try {
-          await api(`/api/rooms/${Player.pin}/answer`, {
-            playerId: Player.id,
-            questionIndex: s.questionIndex,
-            answer: Number(btn.dataset.answer),
-          });
-        } catch { /* fora do tempo — o próximo snapshot resolve a tela */ }
+        sendAnswer(container, s, Number(btn.dataset.index));
       });
     });
   }
@@ -382,6 +542,19 @@ const Live = (() => {
   function drawPlayerReveal(container, s) {
     if (countdown) clearInterval(countdown);
     const me = s.me || {};
+    const scored = s.question.type === 'quiz' || s.question.type === 'tf';
+
+    if (!scored) {
+      container.innerHTML = `
+        <div class="card live-hero">
+          <div class="big" style="font-size:3rem">${me.answered ? '💬' : '⏰'}</div>
+          <h1>${me.answered ? 'Obrigado pela sua opinião!' : 'Tempo esgotado!'}</h1>
+          <p class="muted">Veja as respostas de todos no telão.</p>
+        </div>
+      `;
+      return;
+    }
+
     let icon, title, detail;
     if (!me.answered) {
       icon = '⏰'; title = 'Tempo esgotado!'; detail = 'Você não respondeu esta questão.';
@@ -390,6 +563,11 @@ const Live = (() => {
     } else {
       icon = '❌'; title = 'Não foi dessa vez...'; detail = 'A resposta correta está destacada no telão.';
     }
+    const deltaMsg = me.delta > 0
+      ? `<p class="rank-move up">🔺 Você subiu ${me.delta} ${me.delta === 1 ? 'posição' : 'posições'}!</p>`
+      : me.delta < 0
+        ? `<p class="rank-move down">🔻 Você caiu ${-me.delta} ${me.delta === -1 ? 'posição' : 'posições'}.</p>`
+        : '';
     container.innerHTML = `
       <div class="card live-hero ${me.correct ? 'hero-correct' : 'hero-wrong'}">
         <div class="big" style="font-size:3rem">${icon}</div>
@@ -397,8 +575,9 @@ const Live = (() => {
         <p class="subtitle">${detail}</p>
         <div class="result-stats">
           <div class="stat"><strong>${me.score ?? 0}</strong><span>pontos</span></div>
-          <div class="stat"><strong>${me.rank ? me.rank + 'º' : '-'}</strong><span>posição</span></div>
+          ${me.rank ? `<div class="stat"><strong>${me.rank}º</strong><span>posição</span></div>` : ''}
         </div>
+        ${me.rank ? deltaMsg : ''}
       </div>
     `;
   }
@@ -411,13 +590,16 @@ const Live = (() => {
         <div class="big" style="font-size:3rem">${me.rank === 1 ? '🥇' : me.rank === 2 ? '🥈' : me.rank === 3 ? '🥉' : '🏁'}</div>
         <h1>${me.rank ? me.rank + 'º lugar' : 'Fim de jogo'}</h1>
         <p class="subtitle">${esc(s.quizName)}</p>
-        <span class="badge ${me.passed ? 'badge-pass' : 'badge-fail'}">
-          ${me.passed ? '✅ Aprovado' : '❌ Não atingiu a nota mínima'}
-        </span>
+        ${me.passed === null ? '' : `
+          <span class="badge ${me.passed ? 'badge-pass' : 'badge-fail'}">
+            ${me.passed ? '✅ Aprovado' : '❌ Não atingiu a nota mínima'}
+          </span>`}
         <div class="result-stats">
           <div class="stat"><strong>${me.score ?? 0}</strong><span>pontos</span></div>
-          <div class="stat"><strong>${me.correct ?? 0}/${s.totalQuestions}</strong><span>acertos</span></div>
-          <div class="stat"><strong>${me.percent ?? 0}%</strong><span>nota (mín. ${s.passScore}%)</span></div>
+          ${s.scorableTotal > 0 ? `
+            <div class="stat"><strong>${me.correct ?? 0}/${s.scorableTotal}</strong><span>acertos</span></div>
+            <div class="stat"><strong>${me.percent ?? 0}%</strong><span>nota (mín. ${s.passScore}%)</span></div>
+          ` : ''}
         </div>
         <div class="btn-row" style="justify-content:center">
           <a href="#/" class="btn btn-primary">Concluir</a>

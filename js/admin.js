@@ -1,8 +1,11 @@
-/* ===== Quiz Copérdia — área de administração ===== */
+/* ===== Quiz Copérdia — área de administração (one page, cadastros via modal) ===== */
 
 const Admin = (() => {
   let activeTab = 'trainings';
-  let editingId = null; // treinamento em edição (null = listagem)
+  let expandedId = null; // treinamento com a lista de questões aberta
+
+  const OPT_COLORS = ['red', 'blue', 'yellow', 'green', 'purple', 'orange'];
+  const OPT_SHAPES = ['▲', '◆', '●', '■', '★', '⬟'];
 
   function esc(s) {
     const d = document.createElement('div');
@@ -14,14 +17,61 @@ const Admin = (() => {
     return sessionStorage.getItem('qc_admin_ok') === '1';
   }
 
-  // ---- Porta de entrada: PIN ----
+  /* ---------- Modal genérico ---------- */
+  function openModal(html, { wide = false } = {}) {
+    const root = document.getElementById('modal-root');
+    root.innerHTML = `
+      <div class="modal-overlay">
+        <div class="modal ${wide ? 'modal-wide' : ''}" role="dialog" aria-modal="true">
+          <button class="modal-close" aria-label="Fechar">✕</button>
+          ${html}
+        </div>
+      </div>
+    `;
+    document.body.style.overflow = 'hidden';
+    const overlay = root.querySelector('.modal-overlay');
+    const close = () => closeModal();
+    overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(); });
+    root.querySelector('.modal-close').addEventListener('click', close);
+    root._esc = e => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', root._esc);
+    return root.querySelector('.modal');
+  }
+
+  function closeModal() {
+    const root = document.getElementById('modal-root');
+    if (root._esc) document.removeEventListener('keydown', root._esc);
+    root.innerHTML = '';
+    document.body.style.overflow = '';
+  }
+
+  /* ---------- Upload de imagem com compressão no navegador ---------- */
+  function pickImage(maxSize, cb) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+      const file = input.files[0];
+      if (!file) return;
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        cb(canvas.toDataURL('image/jpeg', 0.78));
+        URL.revokeObjectURL(img.src);
+      };
+      img.onerror = () => alert('Não foi possível ler a imagem.');
+      img.src = URL.createObjectURL(file);
+    };
+    input.click();
+  }
+
+  /* ---------- Entrada ---------- */
   function render(container) {
     if (!isAuthed()) return renderLogin(container);
-    if (editingId) {
-      const t = Store.getTraining(editingId);
-      if (t) return renderEditor(container, t);
-      editingId = null;
-    }
     renderPanel(container);
   }
 
@@ -58,7 +108,7 @@ const Admin = (() => {
     pinInput.focus();
   }
 
-  // ---- Painel com abas ----
+  /* ---------- Painel com abas ---------- */
   function renderPanel(container) {
     container.innerHTML = `
       <h1>Administração</h1>
@@ -82,260 +132,487 @@ const Admin = (() => {
     else renderSettingsTab(content);
   }
 
-  // ---- Aba: Treinamentos ----
+  /* ==================== Aba: Treinamentos ==================== */
+
+  function questionSummary(q, i) {
+    const type = Store.QUESTION_TYPES[q.type] || Store.QUESTION_TYPES.quiz;
+    let detail = '';
+    if (q.type === 'quiz' || q.type === 'tf' || q.type === 'poll') {
+      detail = `
+        <ol type="A">
+          ${q.options.map((o, oi) => `
+            <li class="${q.corrects.includes(oi) ? 'correct' : ''}">
+              ${esc(o)}${q.corrects.includes(oi) ? ' ✔' : ''}
+            </li>`).join('')}
+        </ol>`;
+    } else {
+      detail = '<p class="muted" style="margin-top:6px">Resposta livre — forma uma nuvem de palavras no telão.</p>';
+    }
+    return `
+      <div class="question-card" data-qid="${q.id}">
+        <div class="head">
+          <div>
+            <span class="type-badge">${type.icon} ${type.label}</span>
+            ${q.image ? '<span class="type-badge">🖼️ imagem</span>' : ''}
+            ${q.multi ? '<span class="type-badge">☑ múltipla escolha</span>' : ''}
+            ${q.timeLimit ? `<span class="type-badge">⏱ ${q.timeLimit}s</span>` : ''}
+            ${q.points === 'double' ? '<span class="type-badge">x2 pontos</span>' : ''}
+            ${q.points === 'none' ? '<span class="type-badge">sem pontos</span>' : ''}
+            <strong style="display:block;margin-top:6px">${i + 1}. ${esc(q.text) || '<em>sem enunciado</em>'}</strong>
+          </div>
+          <div class="admin-actions">
+            <button class="btn btn-secondary btn-sm" data-action="edit-q">Editar</button>
+            <button class="btn btn-danger btn-sm" data-action="del-q">Excluir</button>
+          </div>
+        </div>
+        ${detail}
+      </div>
+    `;
+  }
+
   function renderTrainingsTab(content, container) {
     const trainings = Store.getTrainings();
     content.innerHTML = `
       <div class="btn-row" style="margin:0 0 16px">
         <button class="btn btn-primary" id="btn-new">+ Novo treinamento</button>
       </div>
-      <div id="training-list">
-        ${trainings.length === 0 ? `
-          <div class="empty-state">
-            <div class="big">📚</div>
-            <p>Nenhum treinamento cadastrado ainda.</p>
-          </div>` : trainings.map(t => `
-          <div class="admin-training" data-id="${t.id}">
-            <div class="admin-training-head">
-              <div>
-                <h3>${esc(t.name)}</h3>
-                <p class="training-meta">
-                  ${t.questions.length} ${t.questions.length === 1 ? 'questão' : 'questões'} •
-                  nota mínima ${t.passScore}% •
-                  ${t.timePerQuestion}s por questão
-                </p>
-              </div>
-              <div class="admin-actions">
-                <button class="btn btn-primary btn-sm" data-action="play" ${t.questions.length === 0 ? 'disabled title="Adicione questões antes de iniciar"' : ''}>▶ Iniciar ao vivo</button>
-                <button class="btn btn-secondary btn-sm" data-action="edit">Editar</button>
-                <button class="btn btn-danger btn-sm" data-action="delete">Excluir</button>
-              </div>
+      ${trainings.length === 0 ? `
+        <div class="card empty-state">
+          <div class="big">📚</div>
+          <p>Nenhum treinamento cadastrado ainda.</p>
+        </div>` : trainings.map(t => `
+        <div class="admin-training" data-id="${t.id}">
+          <div class="admin-training-head">
+            <div>
+              <h3>${esc(t.name)}</h3>
+              <p class="training-meta">
+                ${t.questions.length} ${t.questions.length === 1 ? 'questão' : 'questões'} •
+                nota mínima ${t.passScore}% •
+                tempo padrão ${t.timePerQuestion}s
+              </p>
+            </div>
+            <div class="admin-actions">
+              <button class="btn btn-primary btn-sm" data-action="play" ${t.questions.length === 0 ? 'disabled title="Adicione questões antes de iniciar"' : ''}>▶ Iniciar ao vivo</button>
+              <button class="btn btn-secondary btn-sm" data-action="questions">${expandedId === t.id ? '▾' : '▸'} Questões</button>
+              <button class="btn btn-ghost btn-sm" data-action="edit">✏ Editar</button>
+              <button class="btn btn-ghost btn-sm" data-action="duplicate">⧉ Duplicar</button>
+              <button class="btn btn-danger btn-sm" data-action="delete">Excluir</button>
             </div>
           </div>
-        `).join('')}
-      </div>
+          <div class="questions-area" style="display:${expandedId === t.id ? 'block' : 'none'}">
+            ${t.questions.map((q, i) => questionSummary(q, i)).join('') ||
+              '<p class="muted" style="margin:10px 0">Nenhuma questão ainda.</p>'}
+            <button class="btn btn-primary btn-sm" data-action="add-q" style="margin-top:6px">+ Adicionar questão</button>
+          </div>
+        </div>
+      `).join('')}
     `;
 
     content.querySelector('#btn-new').addEventListener('click', () => {
-      const t = Store.newTraining({ name: 'Novo treinamento' });
-      Store.upsertTraining(t);
-      editingId = t.id;
-      render(container);
+      openTrainingModal(null, () => renderPanel(container));
     });
 
     content.querySelectorAll('.admin-training').forEach(card => {
       const id = card.dataset.id;
+      const training = () => Store.getTraining(id);
+
+      const playBtn = card.querySelector('[data-action="play"]');
+      if (playBtn && !playBtn.disabled) {
+        playBtn.addEventListener('click', () => { location.hash = `#/host/${id}`; });
+      }
+      card.querySelector('[data-action="questions"]').addEventListener('click', () => {
+        expandedId = expandedId === id ? null : id;
+        renderPanel(container);
+      });
       card.querySelector('[data-action="edit"]').addEventListener('click', () => {
-        editingId = id;
-        render(container);
+        openTrainingModal(training(), () => renderPanel(container));
+      });
+      card.querySelector('[data-action="duplicate"]').addEventListener('click', () => {
+        const copy = JSON.parse(JSON.stringify(training()));
+        copy.id = Store.uid();
+        copy.name = copy.name + ' (cópia)';
+        copy.questions.forEach(q => { q.id = Store.uid(); });
+        Store.upsertTraining(copy);
+        renderPanel(container);
       });
       card.querySelector('[data-action="delete"]').addEventListener('click', () => {
-        const t = Store.getTraining(id);
-        if (confirm(`Excluir o treinamento "${t.name}"? Esta ação não pode ser desfeita.`)) {
+        if (confirm(`Excluir o treinamento "${training().name}"? Esta ação não pode ser desfeita.`)) {
           Store.deleteTraining(id);
           renderPanel(container);
         }
       });
-      const playBtn = card.querySelector('[data-action="play"]');
-      if (playBtn && !playBtn.disabled) {
-        playBtn.addEventListener('click', () => {
-          location.hash = `#/host/${id}`;
+      card.querySelector('[data-action="add-q"]').addEventListener('click', () => {
+        openQuestionModal(training(), null, () => { expandedId = id; renderPanel(container); });
+      });
+      card.querySelectorAll('.question-card').forEach(qc => {
+        const t = training();
+        const q = t.questions.find(x => x.id === qc.dataset.qid);
+        qc.querySelector('[data-action="edit-q"]').addEventListener('click', () => {
+          openQuestionModal(t, q, () => { expandedId = id; renderPanel(container); });
         });
+        qc.querySelector('[data-action="del-q"]').addEventListener('click', () => {
+          if (confirm('Excluir esta questão?')) {
+            t.questions = t.questions.filter(x => x.id !== q.id);
+            Store.upsertTraining(t);
+            expandedId = id;
+            renderPanel(container);
+          }
+        });
+      });
+    });
+  }
+
+  /* ---------- Modal: treinamento ---------- */
+  function openTrainingModal(training, onSave) {
+    const isNew = !training;
+    const t = training || Store.newTraining();
+    const modal = openModal(`
+      <h2>${isNew ? 'Novo treinamento' : 'Editar treinamento'}</h2>
+      <div class="field">
+        <label for="t-name">Nome do treinamento</label>
+        <input type="text" id="t-name" value="${esc(t.name)}" placeholder="Ex.: NR-35 Trabalho em Altura">
+      </div>
+      <div class="field">
+        <label for="t-desc">Descrição (opcional)</label>
+        <textarea id="t-desc" rows="2">${esc(t.description)}</textarea>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="t-pass">Nota mínima p/ aprovação (%)</label>
+          <input type="number" id="t-pass" min="0" max="100" value="${t.passScore}">
+        </div>
+        <div class="field">
+          <label for="t-time">Tempo padrão por questão</label>
+          <select id="t-time">
+            ${Store.TIME_OPTIONS.map(s => `<option value="${s}" ${s === t.timePerQuestion ? 'selected' : ''}>${s} segundos</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+          <input type="checkbox" id="t-shuffle" ${t.shuffleQuestions ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--primary)">
+          Embaralhar a ordem das questões a cada aplicação
+        </label>
+      </div>
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:400">
+          <input type="checkbox" id="t-ranking" ${t.showRanking !== false ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--primary)">
+          Mostrar ranking entre as questões (quem subiu e quem desceu de posição)
+        </label>
+        <p class="muted" style="margin-top:4px;font-size:0.78rem">Desligado, a classificação só aparece no pódio final.</p>
+      </div>
+      <p class="muted" id="t-error" style="color:var(--danger);display:none"></p>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-save">Salvar</button>
+        <button class="btn btn-ghost" id="btn-cancel">Cancelar</button>
+      </div>
+    `);
+
+    modal.querySelector('#btn-cancel').addEventListener('click', closeModal);
+    modal.querySelector('#btn-save').addEventListener('click', () => {
+      const name = modal.querySelector('#t-name').value.trim();
+      if (!name) {
+        const err = modal.querySelector('#t-error');
+        err.textContent = 'Informe o nome do treinamento.';
+        err.style.display = 'block';
+        return;
       }
+      t.name = name;
+      t.description = modal.querySelector('#t-desc').value.trim();
+      t.passScore = Math.min(100, Math.max(0, Number(modal.querySelector('#t-pass').value) || 0));
+      t.timePerQuestion = Number(modal.querySelector('#t-time').value) || 20;
+      t.shuffleQuestions = modal.querySelector('#t-shuffle').checked;
+      t.showRanking = modal.querySelector('#t-ranking').checked;
+      Store.upsertTraining(t);
+      closeModal();
+      onSave();
     });
+    modal.querySelector('#t-name').focus();
   }
 
-  // ---- Editor de treinamento + perguntas ----
-  function renderEditor(container, training) {
-    container.innerHTML = `
-      <div class="btn-row" style="margin:0 0 12px">
-        <button class="btn btn-ghost btn-sm" id="btn-back">← Voltar aos treinamentos</button>
-      </div>
-      <div class="card">
-        <h2>Dados do treinamento</h2>
-        <div class="field">
-          <label for="t-name">Nome do treinamento</label>
-          <input type="text" id="t-name" value="${esc(training.name)}">
-        </div>
-        <div class="field">
-          <label for="t-desc">Descrição (opcional)</label>
-          <textarea id="t-desc" rows="2">${esc(training.description)}</textarea>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="t-pass">Nota mínima para aprovação (%)</label>
-            <input type="number" id="t-pass" min="0" max="100" value="${training.passScore}">
-          </div>
-          <div class="field">
-            <label for="t-time">Tempo por questão (segundos)</label>
-            <input type="number" id="t-time" min="5" max="600" value="${training.timePerQuestion}">
-          </div>
-        </div>
-        <div class="field">
-          <label style="display:flex;align-items:center;gap:8px;font-weight:400">
-            <input type="checkbox" id="t-shuffle" ${training.shuffleQuestions ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--primary)">
-            Embaralhar a ordem das questões a cada aplicação
-          </label>
-        </div>
-        <button class="btn btn-primary" id="btn-save-info">Salvar dados</button>
-        <span class="muted" id="save-feedback" style="margin-left:10px"></span>
-      </div>
+  /* ---------- Modal: questão (estilo Kahoot) ---------- */
+  function openQuestionModal(training, question, onSave) {
+    const isNew = !question;
+    // Trabalha numa cópia para só persistir no salvar
+    const q = JSON.parse(JSON.stringify(question || Store.newQuestion()));
+    if (!Array.isArray(q.optionImages)) q.optionImages = q.options.map(() => null);
 
-      <div class="card">
-        <h2>Questões (${training.questions.length})</h2>
-        <div id="question-list">
-          ${training.questions.map((q, i) => `
-            <div class="question-card" data-qid="${q.id}">
-              <div class="head">
-                <strong>${i + 1}. ${esc(q.text) || '<em>sem enunciado</em>'}</strong>
-                <div class="admin-actions">
-                  <button class="btn btn-secondary btn-sm" data-action="edit-q">Editar</button>
-                  <button class="btn btn-danger btn-sm" data-action="del-q">Excluir</button>
-                </div>
-              </div>
-              <ol type="A">
-                ${q.options.map((o, oi) => `<li class="${oi === q.correct ? 'correct' : ''}">${esc(o)}${oi === q.correct ? ' ✔' : ''}</li>`).join('')}
-              </ol>
-            </div>
-          `).join('') || '<p class="muted">Nenhuma questão ainda. Adicione a primeira abaixo.</p>'}
-        </div>
-        <div id="question-form-area"></div>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="btn-add-q">+ Adicionar questão</button>
-        </div>
-      </div>
-    `;
-
-    container.querySelector('#btn-back').addEventListener('click', () => {
-      editingId = null;
-      render(container);
-    });
-
-    container.querySelector('#btn-save-info').addEventListener('click', () => {
-      training.name = container.querySelector('#t-name').value.trim() || 'Treinamento sem nome';
-      training.description = container.querySelector('#t-desc').value.trim();
-      training.passScore = Math.min(100, Math.max(0, Number(container.querySelector('#t-pass').value) || 0));
-      training.timePerQuestion = Math.min(600, Math.max(5, Number(container.querySelector('#t-time').value) || 30));
-      training.shuffleQuestions = container.querySelector('#t-shuffle').checked;
-      Store.upsertTraining(training);
-      const fb = container.querySelector('#save-feedback');
-      fb.textContent = '✔ Salvo';
-      setTimeout(() => { fb.textContent = ''; }, 1800);
-    });
-
-    container.querySelector('#btn-add-q').addEventListener('click', () => {
-      renderQuestionForm(container, training, Store.newQuestion(), true);
-    });
-
-    container.querySelectorAll('.question-card').forEach(card => {
-      const q = training.questions.find(x => x.id === card.dataset.qid);
-      card.querySelector('[data-action="edit-q"]').addEventListener('click', () => {
-        renderQuestionForm(container, training, q, false);
-      });
-      card.querySelector('[data-action="del-q"]').addEventListener('click', () => {
-        if (confirm('Excluir esta questão?')) {
-          training.questions = training.questions.filter(x => x.id !== q.id);
-          Store.upsertTraining(training);
-          renderEditor(container, training);
-        }
-      });
-    });
-  }
-
-  // ---- Formulário de questão ----
-  function renderQuestionForm(container, training, question, isNew) {
-    const area = container.querySelector('#question-form-area');
-    const options = question.options.slice();
-    while (options.length < 2) options.push('');
+    const modal = openModal('', { wide: true });
 
     const draw = () => {
-      area.innerHTML = `
-        <div class="card" style="background:var(--primary-light);margin-top:14px">
-          <h2>${isNew ? 'Nova questão' : 'Editar questão'}</h2>
-          <div class="field">
-            <label for="q-text">Enunciado</label>
-            <textarea id="q-text" rows="2" placeholder="Digite a pergunta">${esc(question.text)}</textarea>
-          </div>
-          <label>Alternativas — marque a correta</label>
-          <div id="q-options" style="margin-top:8px">
-            ${options.map((o, i) => `
-              <div class="option-edit-row">
-                <input type="radio" name="q-correct" value="${i}" ${i === question.correct ? 'checked' : ''}>
-                <input type="text" data-opt="${i}" value="${esc(o)}" placeholder="Alternativa ${String.fromCharCode(65 + i)}">
-                ${options.length > 2 ? `<button class="btn btn-ghost btn-sm" data-remove="${i}" title="Remover alternativa">✕</button>` : ''}
+      const type = q.type;
+      const hasOptions = type === 'quiz' || type === 'poll';
+      const scored = type === 'quiz' || type === 'tf';
+
+      modal.innerHTML = `
+        <button class="modal-close" aria-label="Fechar">✕</button>
+        <h2>${isNew ? 'Nova questão' : 'Editar questão'}</h2>
+
+        <div class="q-editor">
+          <div class="q-editor-main">
+            <div class="field">
+              <label for="q-text">Enunciado</label>
+              <textarea id="q-text" rows="2" placeholder="Comece a digitar a pergunta">${esc(q.text)}</textarea>
+            </div>
+
+            <div class="q-media-edit ${q.image ? 'has-img' : ''}" id="q-media-edit">
+              ${q.image
+                ? `<img src="${q.image}" alt=""><button class="btn btn-danger btn-sm" id="btn-del-img">✕ Remover imagem</button>`
+                : `<button class="btn btn-ghost" id="btn-add-img">🖼️ Inserir mídia (opcional)</button>`}
+            </div>
+
+            ${type === 'wordcloud' ? `
+              <div class="notice notice-info">
+                ☁️ Os participantes digitam uma resposta curta e livre. As respostas formam uma
+                nuvem de palavras no telão. Não há resposta certa nem pontos.
+              </div>` : ''}
+
+            ${type === 'tf' ? `
+              <label>Qual é a resposta correta?</label>
+              <div class="live-options tf" style="margin-top:8px">
+                <button class="live-option blue tf-pick ${q.corrects[0] === 0 ? 'is-selected' : ''}" data-tf="0">
+                  <span class="shape">✔</span><span>Verdadeiro</span>
+                </button>
+                <button class="live-option red tf-pick ${q.corrects[0] === 1 ? 'is-selected' : ''}" data-tf="1">
+                  <span class="shape">✖</span><span>Falso</span>
+                </button>
+              </div>` : ''}
+
+            ${hasOptions ? `
+              <label>Alternativas${type === 'quiz' ? ' — marque a(s) correta(s)' : ''}</label>
+              <div id="q-options" style="margin-top:8px">
+                ${q.options.map((o, i) => `
+                  <div class="option-edit-row">
+                    ${type === 'quiz'
+                      ? `<input type="${q.multi ? 'checkbox' : 'radio'}" name="q-correct" value="${i}" ${q.corrects.includes(i) ? 'checked' : ''} title="Correta">`
+                      : ''}
+                    <span class="opt-chip ${OPT_COLORS[i]}">${OPT_SHAPES[i]}</span>
+                    <input type="text" data-opt="${i}" value="${esc(o)}" placeholder="Alternativa ${i + 1}${i >= 2 ? ' (opcional)' : ''}">
+                    <button class="btn btn-ghost btn-sm" data-img="${i}" title="${q.optionImages[i] ? 'Trocar imagem' : 'Adicionar imagem'}">
+                      ${q.optionImages[i] ? `<img class="opt-thumb" src="${q.optionImages[i]}">` : '🖼️'}
+                    </button>
+                    ${q.optionImages[i] ? `<button class="btn btn-ghost btn-sm" data-img-del="${i}" title="Remover imagem">✕</button>` : ''}
+                    ${q.options.length > 2 ? `<button class="btn btn-ghost btn-sm" data-remove="${i}" title="Remover alternativa">🗑</button>` : ''}
+                  </div>
+                `).join('')}
               </div>
-            `).join('')}
+              ${q.options.length < 6 ? '<button class="btn btn-ghost btn-sm" id="btn-add-opt">+ Adicionar mais respostas</button>' : ''}
+            ` : ''}
+
+            <p class="muted" id="q-error" style="color:var(--danger);display:none"></p>
           </div>
-          <div class="btn-row" style="margin-top:6px">
-            ${options.length < 6 ? '<button class="btn btn-ghost btn-sm" id="btn-add-opt">+ Alternativa</button>' : ''}
-          </div>
-          <p class="muted" id="q-error" style="color:var(--danger);display:none"></p>
-          <div class="btn-row">
-            <button class="btn btn-primary" id="btn-save-q">Salvar questão</button>
-            <button class="btn btn-ghost" id="btn-cancel-q">Cancelar</button>
-          </div>
+
+          <aside class="q-editor-props">
+            <h3>Propriedades da pergunta</h3>
+            <div class="field">
+              <label for="q-type">🎴 Tipo de pergunta</label>
+              <select id="q-type">
+                ${Object.entries(Store.QUESTION_TYPES).map(([k, v]) =>
+                  `<option value="${k}" ${k === type ? 'selected' : ''}>${v.icon} ${v.label}</option>`).join('')}
+              </select>
+              <p class="muted" style="margin-top:4px;font-size:0.78rem">${Store.QUESTION_TYPES[type].desc}</p>
+            </div>
+            <div class="field">
+              <label for="q-time">⏱ Limite de tempo</label>
+              <select id="q-time">
+                <option value="">Padrão do treinamento (${training.timePerQuestion}s)</option>
+                ${Store.TIME_OPTIONS.map(s => `<option value="${s}" ${s === q.timeLimit ? 'selected' : ''}>${s} segundos</option>`).join('')}
+              </select>
+              <a href="javascript:void(0)" id="apply-time-all" class="muted" style="font-size:0.78rem">Aplicar a todas as perguntas</a>
+            </div>
+            ${scored ? `
+              <div class="field">
+                <label for="q-points">🏅 Pontos</label>
+                <select id="q-points">
+                  ${Object.entries(Store.POINTS_OPTIONS).map(([k, v]) =>
+                    `<option value="${k}" ${k === q.points ? 'selected' : ''}>${v.label}</option>`).join('')}
+                </select>
+                <p class="muted" style="margin-top:4px;font-size:0.78rem">${Store.POINTS_OPTIONS[q.points].desc}</p>
+              </div>` : ''}
+            ${type === 'quiz' ? `
+              <div class="field">
+                <label for="q-mode">☑️ Opções de resposta</label>
+                <select id="q-mode">
+                  <option value="single" ${!q.multi ? 'selected' : ''}>Seleção simples</option>
+                  <option value="multi" ${q.multi ? 'selected' : ''}>Múltipla escolha</option>
+                </select>
+                <p class="muted" style="margin-top:4px;font-size:0.78rem">
+                  ${q.multi ? 'Os participantes podem selecionar múltiplas respostas antes de enviar' : 'Os participantes só podem selecionar uma resposta'}
+                </p>
+              </div>` : ''}
+          </aside>
+        </div>
+
+        <div class="btn-row" style="margin-top:18px">
+          <button class="btn btn-primary" id="btn-save-q">Salvar questão</button>
+          <button class="btn btn-ghost" id="btn-cancel-q">Cancelar</button>
         </div>
       `;
 
-      const syncOptions = () => {
-        area.querySelectorAll('[data-opt]').forEach(inp => {
-          options[Number(inp.dataset.opt)] = inp.value;
+      /* --- coleta o estado atual dos campos --- */
+      const sync = () => {
+        const textEl = modal.querySelector('#q-text');
+        if (textEl) q.text = textEl.value;
+        modal.querySelectorAll('[data-opt]').forEach(inp => {
+          q.options[Number(inp.dataset.opt)] = inp.value;
         });
-        const checked = area.querySelector('input[name="q-correct"]:checked');
-        if (checked) question.correct = Number(checked.value);
-        question.text = area.querySelector('#q-text').value;
+        if (q.type === 'quiz') {
+          const checked = [...modal.querySelectorAll('input[name="q-correct"]:checked')].map(el => Number(el.value));
+          if (checked.length) q.corrects = checked.sort((a, b) => a - b);
+        }
+        const timeEl = modal.querySelector('#q-time');
+        if (timeEl) q.timeLimit = timeEl.value ? Number(timeEl.value) : null;
+        const pointsEl = modal.querySelector('#q-points');
+        if (pointsEl) q.points = pointsEl.value;
       };
 
-      const addOptBtn = area.querySelector('#btn-add-opt');
-      if (addOptBtn) addOptBtn.addEventListener('click', () => {
-        syncOptions();
-        options.push('');
+      /* --- troca de tipo --- */
+      modal.querySelector('#q-type').addEventListener('change', e => {
+        sync();
+        q.type = e.target.value;
+        if (q.type === 'tf') {
+          q.options = ['Verdadeiro', 'Falso'];
+          q.optionImages = [null, null];
+          q.corrects = [0];
+          q.multi = false;
+        } else if (q.type === 'wordcloud') {
+          q.options = [];
+          q.optionImages = [];
+          q.corrects = [];
+          q.multi = false;
+          q.points = 'none';
+        } else if (q.type === 'poll') {
+          if (q.options.length < 2) { q.options = ['', '']; q.optionImages = [null, null]; }
+          q.corrects = [];
+          q.multi = false;
+          q.points = 'none';
+        } else if (q.type === 'quiz') {
+          if (q.options.length < 2) { q.options = ['', '', '', '']; q.optionImages = [null, null, null, null]; }
+          if (q.corrects.length === 0) q.corrects = [0];
+          if (q.points === 'none') q.points = 'standard';
+        }
         draw();
       });
 
-      area.querySelectorAll('[data-remove]').forEach(btn => {
+      /* --- modo simples/múltipla --- */
+      const modeEl = modal.querySelector('#q-mode');
+      if (modeEl) modeEl.addEventListener('change', e => {
+        sync();
+        q.multi = e.target.value === 'multi';
+        if (!q.multi && q.corrects.length > 1) q.corrects = [q.corrects[0]];
+        draw();
+      });
+
+      /* --- verdadeiro/falso --- */
+      modal.querySelectorAll('.tf-pick').forEach(btn => {
         btn.addEventListener('click', () => {
-          syncOptions();
-          const idx = Number(btn.dataset.remove);
-          options.splice(idx, 1);
-          if (question.correct >= options.length) question.correct = 0;
+          sync();
+          q.corrects = [Number(btn.dataset.tf)];
           draw();
         });
       });
 
-      area.querySelector('#btn-cancel-q').addEventListener('click', () => {
-        area.innerHTML = '';
+      /* --- mídia da pergunta --- */
+      const addImg = modal.querySelector('#btn-add-img');
+      if (addImg) addImg.addEventListener('click', () => {
+        sync();
+        pickImage(900, dataUrl => { q.image = dataUrl; draw(); });
+      });
+      const delImg = modal.querySelector('#btn-del-img');
+      if (delImg) delImg.addEventListener('click', () => { sync(); q.image = null; draw(); });
+
+      /* --- imagens das alternativas --- */
+      modal.querySelectorAll('[data-img]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          sync();
+          const i = Number(btn.dataset.img);
+          pickImage(500, dataUrl => { q.optionImages[i] = dataUrl; draw(); });
+        });
+      });
+      modal.querySelectorAll('[data-img-del]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          sync();
+          q.optionImages[Number(btn.dataset.imgDel)] = null;
+          draw();
+        });
       });
 
-      area.querySelector('#btn-save-q').addEventListener('click', () => {
-        syncOptions();
-        const text = question.text.trim();
-        const filled = options.map(o => o.trim());
-        const err = area.querySelector('#q-error');
-        if (!text) {
-          err.textContent = 'Informe o enunciado da questão.';
-          err.style.display = 'block';
-          return;
-        }
-        if (filled.some(o => !o)) {
-          err.textContent = 'Preencha todas as alternativas (ou remova as vazias).';
-          err.style.display = 'block';
-          return;
-        }
-        question.text = text;
-        question.options = filled;
-        if (isNew) training.questions.push(question);
+      /* --- adicionar/remover alternativas --- */
+      const addOpt = modal.querySelector('#btn-add-opt');
+      if (addOpt) addOpt.addEventListener('click', () => {
+        sync();
+        q.options.push('');
+        q.optionImages.push(null);
+        draw();
+      });
+      modal.querySelectorAll('[data-remove]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          sync();
+          const i = Number(btn.dataset.remove);
+          q.options.splice(i, 1);
+          q.optionImages.splice(i, 1);
+          q.corrects = q.corrects.filter(c => c !== i).map(c => (c > i ? c - 1 : c));
+          if ((q.type === 'quiz') && q.corrects.length === 0) q.corrects = [0];
+          draw();
+        });
+      });
+
+      /* --- aplicar tempo a todas --- */
+      modal.querySelector('#apply-time-all').addEventListener('click', () => {
+        sync();
+        const value = q.timeLimit;
+        training.questions.forEach(other => { other.timeLimit = value; });
+        if (question) question.timeLimit = value;
         Store.upsertTraining(training);
-        renderEditor(container, training);
+        const link = modal.querySelector('#apply-time-all');
+        link.textContent = '✔ Aplicado a todas';
+        setTimeout(() => { link.textContent = 'Aplicar a todas as perguntas'; }, 1800);
       });
 
-      area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      /* --- salvar / cancelar / fechar --- */
+      modal.querySelector('.modal-close').addEventListener('click', closeModal);
+      modal.querySelector('#btn-cancel-q').addEventListener('click', closeModal);
+      modal.querySelector('#btn-save-q').addEventListener('click', () => {
+        sync();
+        const err = modal.querySelector('#q-error');
+        const fail = msg => { err.textContent = msg; err.style.display = 'block'; };
+        if (!q.text.trim()) return fail('Informe o enunciado da questão.');
+        if (q.type === 'quiz' || q.type === 'poll') {
+          const filled = q.options.map((o, i) => ({ text: o.trim(), image: q.optionImages[i], i }))
+            .filter(o => o.text || o.image);
+          if (filled.length < 2) return fail('Preencha pelo menos 2 alternativas (texto ou imagem).');
+          const empty = q.options.findIndex((o, i) => !o.trim() && !q.optionImages[i]);
+          // remove alternativas totalmente vazias do fim/meio
+          if (empty >= 0) {
+            const keepIdx = filled.map(o => o.i);
+            q.corrects = q.corrects.filter(c => keepIdx.includes(c)).map(c => keepIdx.indexOf(c));
+            q.options = filled.map(o => o.text || ' ');
+            q.optionImages = filled.map(o => o.image);
+          }
+          if (q.type === 'quiz' && q.corrects.length === 0) return fail('Marque a alternativa correta.');
+        }
+        q.text = q.text.trim();
+        const saved = Store.getTraining(training.id);
+        if (isNew) {
+          saved.questions.push(q);
+        } else {
+          const idx = saved.questions.findIndex(x => x.id === q.id);
+          if (idx >= 0) saved.questions[idx] = q; else saved.questions.push(q);
+        }
+        try {
+          Store.upsertTraining(saved);
+        } catch {
+          return fail('Espaço de armazenamento cheio — use menos imagens ou imagens menores.');
+        }
+        closeModal();
+        onSave();
+      });
     };
 
     draw();
   }
 
-  // ---- Aba: Resultados ----
+  /* ==================== Aba: Resultados ==================== */
   function renderResultsTab(content) {
     const results = Store.getResults();
     const trainings = [...new Set(results.map(r => r.trainingName))];
@@ -374,7 +651,7 @@ const Admin = (() => {
       tableWrap.innerHTML = `
         <table>
           <thead>
-            <tr><th>Data</th><th>Treinamento</th><th>Participante</th><th>Acertos</th><th>Nota</th><th>Situação</th><th>Tempo</th></tr>
+            <tr><th>Data</th><th>Treinamento</th><th>Participante</th><th>Acertos</th><th>Nota</th><th>Situação</th></tr>
           </thead>
           <tbody>
             ${rows.map(r => `
@@ -383,9 +660,10 @@ const Admin = (() => {
                 <td>${esc(r.trainingName)}</td>
                 <td>${esc(r.participant)}</td>
                 <td>${r.correct}/${r.total}</td>
-                <td><strong>${r.score}%</strong></td>
-                <td><span class="pill ${r.passed ? 'pill-pass' : 'pill-fail'}">${r.passed ? 'Aprovado' : 'Reprovado'}</span></td>
-                <td>${r.durationSec}s</td>
+                <td><strong>${r.score === null ? '—' : r.score + '%'}</strong></td>
+                <td>${r.passed === null
+                  ? '<span class="pill">Participou</span>'
+                  : `<span class="pill ${r.passed ? 'pill-pass' : 'pill-fail'}">${r.passed ? 'Aprovado' : 'Reprovado'}</span>`}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -398,12 +676,13 @@ const Admin = (() => {
     content.querySelector('#btn-csv').addEventListener('click', () => {
       const filter = filterSel.value;
       const rows = filter ? results.filter(r => r.trainingName === filter) : results;
-      const header = ['Data', 'Treinamento', 'Participante', 'Acertos', 'Total', 'Nota (%)', 'Situacao', 'Tempo (s)'];
+      const header = ['Data', 'Treinamento', 'Participante', 'Acertos', 'Total', 'Nota (%)', 'Situacao'];
       const csvEsc = v => `"${String(v).replace(/"/g, '""')}"`;
       const lines = [header.join(';')].concat(rows.map(r => [
         new Date(r.date).toLocaleString('pt-BR'),
-        r.trainingName, r.participant, r.correct, r.total, r.score,
-        r.passed ? 'Aprovado' : 'Reprovado', r.durationSec,
+        r.trainingName, r.participant, r.correct, r.total,
+        r.score === null ? '' : r.score,
+        r.passed === null ? 'Participou' : (r.passed ? 'Aprovado' : 'Reprovado'),
       ].map(csvEsc).join(';')));
       // BOM para o Excel abrir acentos corretamente
       const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -422,7 +701,7 @@ const Admin = (() => {
     });
   }
 
-  // ---- Aba: Configurações ----
+  /* ==================== Aba: Configurações ==================== */
   function renderSettingsTab(content) {
     content.innerHTML = `
       <div class="card">

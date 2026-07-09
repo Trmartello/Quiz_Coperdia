@@ -13,8 +13,11 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
 const ROOM_TTL_MS = 3 * 60 * 60 * 1000; // salas expiram após 3h
-const DEFAULT_TIME = 30;                // segundos por questão quando não definido
+const DEFAULT_TIME = 20;                // segundos por questão quando não definido
 const REVEAL_DELAY_MS = 800;            // margem após o fim do tempo
+
+const QUESTION_TYPES = ['quiz', 'tf', 'poll', 'wordcloud'];
+const POINTS_MULTIPLIER = { standard: 1, double: 2, none: 0 };
 
 const rooms = new Map(); // pin -> room
 
@@ -46,7 +49,7 @@ function readBody(req) {
     let data = '';
     req.on('data', chunk => {
       data += chunk;
-      if (data.length > 1_000_000) { reject(new Error('payload too large')); req.destroy(); }
+      if (data.length > 12_000_000) { reject(new Error('payload too large')); req.destroy(); }
     });
     req.on('end', () => {
       try { resolve(data ? JSON.parse(data) : {}); } catch { reject(new Error('invalid json')); }
@@ -57,23 +60,81 @@ function readBody(req) {
 
 /* ==================== Modelo da sala ==================== */
 
+function sanitizeImage(value, maxBytes) {
+  return typeof value === 'string' && value.startsWith('data:image/') && value.length <= maxBytes
+    ? value : null;
+}
+
 function sanitizeQuiz(quiz) {
   if (!quiz || typeof quiz.name !== 'string' || !Array.isArray(quiz.questions)) return null;
-  const questions = quiz.questions
-    .filter(q => q && typeof q.text === 'string' && Array.isArray(q.options) &&
-      q.options.length >= 2 && q.options.length <= 6 &&
-      Number.isInteger(q.correct) && q.correct >= 0 && q.correct < q.options.length)
-    .map(q => ({
-      text: String(q.text).slice(0, 500),
-      options: q.options.map(o => String(o).slice(0, 300)),
-      correct: q.correct,
-    }));
+  const defaultTime = Number(quiz.timePerQuestion);
+  const questions = [];
+
+  for (const raw of quiz.questions) {
+    if (!raw || typeof raw.text !== 'string' || !raw.text.trim()) continue;
+    const type = QUESTION_TYPES.includes(raw.type) ? raw.type : 'quiz';
+    const q = {
+      type,
+      text: String(raw.text).slice(0, 500),
+      image: sanitizeImage(raw.image, 600_000),
+      options: [],
+      optionImages: [],
+      corrects: [],
+      multi: false,
+      timeLimit: null,
+      pointsMultiplier: POINTS_MULTIPLIER[raw.points] !== undefined
+        ? POINTS_MULTIPLIER[raw.points] : 1,
+    };
+    const t = Number(raw.timeLimit);
+    if (t >= 5 && t <= 600) q.timeLimit = Math.round(t);
+
+    if (type === 'quiz' || type === 'poll') {
+      if (!Array.isArray(raw.options)) continue;
+      // Mantém texto+imagem pareados e remapeia os índices corretos se alguma opção vazia for removida
+      const rawImages = Array.isArray(raw.optionImages) ? raw.optionImages : [];
+      const kept = [];
+      const indexMap = new Map();
+      raw.options.forEach((o, i) => {
+        const text = String(o).slice(0, 300).trim();
+        const image = sanitizeImage(rawImages[i], 300_000);
+        if (text || image) {
+          indexMap.set(i, kept.length);
+          kept.push({ text: text || ' ', image });
+        }
+      });
+      if (kept.length < 2 || kept.length > 6) continue;
+      q.options = kept.map(o => o.text);
+      q.optionImages = kept.map(o => o.image);
+      if (Array.isArray(raw.corrects)) {
+        raw.corrects = raw.corrects
+          .filter(i => indexMap.has(i))
+          .map(i => indexMap.get(i));
+      }
+    }
+    if (type === 'tf') {
+      q.options = ['Verdadeiro', 'Falso'];
+      q.optionImages = [null, null];
+    }
+    if (type === 'quiz' || type === 'tf') {
+      const corrects = Array.isArray(raw.corrects) ? raw.corrects : [];
+      q.corrects = [...new Set(corrects)]
+        .filter(i => Number.isInteger(i) && i >= 0 && i < q.options.length)
+        .sort((a, b) => a - b);
+      if (q.corrects.length === 0) continue;
+      q.multi = type === 'quiz' && raw.multi === true;
+      if (!q.multi && q.corrects.length > 1) q.corrects = [q.corrects[0]];
+    } else {
+      q.pointsMultiplier = 0; // enquete e nuvem de palavras não pontuam
+    }
+    questions.push(q);
+  }
+
   if (questions.length === 0) return null;
-  const time = Number(quiz.timePerQuestion);
   return {
     name: String(quiz.name).slice(0, 200),
     passScore: Math.min(100, Math.max(0, Number(quiz.passScore) || 0)),
-    timePerQuestion: time >= 5 && time <= 600 ? Math.round(time) : DEFAULT_TIME,
+    timePerQuestion: defaultTime >= 5 && defaultTime <= 600 ? Math.round(defaultTime) : DEFAULT_TIME,
+    showRanking: quiz.showRanking !== false,
     questions,
   };
 }
@@ -83,11 +144,15 @@ function createRoom(quiz) {
     pin: newPin(),
     hostToken: uid(),
     quiz,
+    // nº de questões que valem nota (base do % de acerto)
+    scorableTotal: quiz.questions.filter(q => q.type === 'quiz' || q.type === 'tf').length,
     state: 'lobby', // lobby | question | reveal | podium
     questionIndex: -1,
     questionStartedAt: 0,
     questionTimer: null,
-    players: new Map(), // playerId -> { name, score, streak, answers: Map(qIdx -> {answer, ms, points, correct}) }
+    players: new Map(), // playerId -> { name, score, streak, correctCount, answers: Map(qIdx -> {value, ms, correct, points}) }
+    prevRanks: new Map(),  // playerId -> posição antes da questão atual (para o "subiu/desceu")
+    rankDeltas: new Map(), // playerId -> variação de posição na última revelação
     connections: new Set(), // { res, role, playerId }
     createdAt: Date.now(),
     lastActivity: Date.now(),
@@ -100,11 +165,16 @@ function touch(room) {
   room.lastActivity = Date.now();
 }
 
+function questionLimitMs(room) {
+  const q = currentQuestion(room);
+  return ((q && q.timeLimit) || room.quiz.timePerQuestion) * 1000;
+}
+
 // Pontuação estilo Kahoot: acerto vale 500 + até 500 pela velocidade
-function computePoints(correct, elapsedMs, limitMs) {
-  if (!correct) return 0;
+function computePoints(correct, elapsedMs, limitMs, multiplier) {
+  if (!correct || multiplier === 0) return 0;
   const ratio = Math.min(1, Math.max(0, elapsedMs / limitMs));
-  return 500 + Math.round(500 * (1 - ratio));
+  return (500 + Math.round(500 * (1 - ratio))) * multiplier;
 }
 
 function leaderboard(room) {
@@ -120,12 +190,30 @@ function currentQuestion(room) {
 
 function answerCounts(room) {
   const q = currentQuestion(room);
-  const counts = q ? q.options.map(() => 0) : [];
+  if (!q || q.type === 'wordcloud') return [];
+  const counts = q.options.map(() => 0);
   for (const p of room.players.values()) {
     const a = p.answers.get(room.questionIndex);
-    if (a && a.answer != null && counts[a.answer] !== undefined) counts[a.answer]++;
+    if (!a) continue;
+    const values = Array.isArray(a.value) ? a.value : [a.value];
+    for (const v of values) {
+      if (Number.isInteger(v) && counts[v] !== undefined) counts[v]++;
+    }
   }
   return counts;
+}
+
+function wordCloud(room) {
+  const words = new Map(); // chave minúscula -> { text, count }
+  for (const p of room.players.values()) {
+    const a = p.answers.get(room.questionIndex);
+    if (!a || typeof a.value !== 'string') continue;
+    const key = a.value.toLowerCase();
+    const entry = words.get(key) || { text: a.value, count: 0 };
+    entry.count++;
+    words.set(key, entry);
+  }
+  return [...words.values()].sort((a, b) => b.count - a.count).slice(0, 60);
 }
 
 function answeredCount(room) {
@@ -137,6 +225,14 @@ function answeredCount(room) {
 }
 
 /* ==================== Snapshots por papel ==================== */
+
+function questionPublic(q) {
+  return {
+    type: q.type, text: q.text, image: q.image,
+    options: q.options, optionImages: q.optionImages,
+    multi: q.multi, isScored: q.pointsMultiplier > 0,
+  };
+}
 
 function snapshotFor(room, conn) {
   const base = {
@@ -153,23 +249,32 @@ function snapshotFor(room, conn) {
   }
 
   if (room.state === 'question' && q) {
-    const limitMs = room.quiz.timePerQuestion * 1000;
-    base.question = { text: q.text, options: q.options };
+    const limitMs = questionLimitMs(room);
+    base.question = questionPublic(q);
     base.remainingMs = Math.max(0, limitMs - (Date.now() - room.questionStartedAt));
     base.limitMs = limitMs;
     base.answeredCount = answeredCount(room);
     if (conn.role === 'player') {
       const p = room.players.get(conn.playerId);
-      const a = p && p.answers.get(room.questionIndex);
-      base.myAnswer = a ? a.answer : null;
+      base.answered = !!(p && p.answers.has(room.questionIndex));
     }
   }
 
   if (room.state === 'reveal' && q) {
-    base.question = { text: q.text, options: q.options };
-    base.correct = q.correct;
-    base.counts = answerCounts(room);
-    base.leaderboard = leaderboard(room).slice(0, 5);
+    base.question = questionPublic(q);
+    if (q.type === 'wordcloud') {
+      base.words = wordCloud(room);
+    } else {
+      base.counts = answerCounts(room);
+    }
+    if (q.type === 'quiz' || q.type === 'tf') {
+      base.corrects = q.corrects;
+    }
+    base.showRanking = room.quiz.showRanking;
+    if (room.quiz.showRanking) {
+      base.leaderboard = leaderboard(room).slice(0, 5)
+        .map(p => ({ ...p, delta: room.rankDeltas.get(p.id) || 0 }));
+    }
     base.isLast = room.questionIndex + 1 >= room.quiz.questions.length;
     if (conn.role === 'player') {
       const p = room.players.get(conn.playerId);
@@ -178,10 +283,11 @@ function snapshotFor(room, conn) {
       const me = all.find(x => x.id === conn.playerId);
       base.me = {
         answered: !!a,
-        correct: !!(a && a.correct),
+        correct: a ? a.correct : null,
         points: a ? a.points : 0,
         score: p ? p.score : 0,
-        rank: me ? me.rank : null,
+        rank: room.quiz.showRanking && me ? me.rank : null,
+        delta: room.quiz.showRanking ? (room.rankDeltas.get(conn.playerId) || 0) : 0,
         streak: p ? p.streak : 0,
       };
     }
@@ -191,11 +297,12 @@ function snapshotFor(room, conn) {
     const all = leaderboard(room);
     base.leaderboard = all;
     base.passScore = room.quiz.passScore;
+    base.scorableTotal = room.scorableTotal;
     base.results = all.map(p => {
       const player = room.players.get(p.id);
-      const pct = room.quiz.questions.length
-        ? Math.round((player.correctCount / room.quiz.questions.length) * 100) : 0;
-      return { ...p, percent: pct, passed: pct >= room.quiz.passScore };
+      const percent = room.scorableTotal > 0
+        ? Math.round((player.correctCount / room.scorableTotal) * 100) : null;
+      return { ...p, percent, passed: percent === null ? null : percent >= room.quiz.passScore };
     });
     if (conn.role === 'player') {
       base.me = base.results.find(x => x.id === conn.playerId) || null;
@@ -220,8 +327,7 @@ function startQuestion(room, index) {
   room.state = 'question';
   room.questionIndex = index;
   room.questionStartedAt = Date.now();
-  const limitMs = room.quiz.timePerQuestion * 1000;
-  room.questionTimer = setTimeout(() => reveal(room), limitMs + REVEAL_DELAY_MS);
+  room.questionTimer = setTimeout(() => reveal(room), questionLimitMs(room) + REVEAL_DELAY_MS);
   touch(room);
   broadcast(room);
 }
@@ -230,6 +336,13 @@ function reveal(room) {
   if (room.state !== 'question') return;
   clearTimeout(room.questionTimer);
   room.state = 'reveal';
+  // Variação de posição: compara com o ranking anterior a esta questão
+  const lb = leaderboard(room);
+  room.rankDeltas = new Map(lb.map(p => {
+    const prev = room.prevRanks.get(p.id);
+    return [p.id, prev === undefined ? 0 : prev - p.rank];
+  }));
+  room.prevRanks = new Map(lb.map(p => [p.id, p.rank]));
   touch(room);
   broadcast(room);
 }
@@ -239,6 +352,47 @@ function endGame(room) {
   room.state = 'podium';
   touch(room);
   broadcast(room);
+}
+
+/* ==================== Registro de respostas ==================== */
+
+function registerAnswer(room, player, body) {
+  const q = currentQuestion(room);
+  const limitMs = questionLimitMs(room);
+  const elapsedMs = Date.now() - room.questionStartedAt;
+  if (elapsedMs > limitMs + REVEAL_DELAY_MS) return { error: 'Tempo esgotado.', status: 409 };
+
+  let value, correct = null;
+
+  if (q.type === 'wordcloud') {
+    const text = String(body.answer || '').trim().replace(/\s+/g, ' ').slice(0, 30);
+    if (!text) return { error: 'Digite uma resposta.', status: 400 };
+    value = text;
+  } else if (q.multi) {
+    const arr = Array.isArray(body.answer) ? body.answer : null;
+    if (!arr || arr.length === 0) return { error: 'Selecione ao menos uma alternativa.', status: 400 };
+    value = [...new Set(arr)]
+      .filter(i => Number.isInteger(i) && i >= 0 && i < q.options.length)
+      .sort((a, b) => a - b);
+    if (value.length === 0) return { error: 'Resposta inválida.', status: 400 };
+    correct = value.length === q.corrects.length && value.every((v, i) => v === q.corrects[i]);
+  } else {
+    const idx = Number(body.answer);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= q.options.length) {
+      return { error: 'Resposta inválida.', status: 400 };
+    }
+    value = idx;
+    if (q.type === 'quiz' || q.type === 'tf') correct = q.corrects.includes(idx);
+  }
+
+  const points = computePoints(correct === true, elapsedMs, limitMs, q.pointsMultiplier);
+  player.answers.set(room.questionIndex, { value, ms: elapsedMs, correct, points });
+  player.score += points;
+  if (q.type === 'quiz' || q.type === 'tf') {
+    player.streak = correct ? player.streak + 1 : 0;
+    if (correct) player.correctCount++;
+  }
+  return { ok: true };
 }
 
 /* ==================== Rotas da API ==================== */
@@ -288,21 +442,8 @@ async function handleApi(req, res, urlPath, query) {
     if (player.answers.has(room.questionIndex)) {
       return json(res, 409, { error: 'Você já respondeu esta questão.' });
     }
-    const q = currentQuestion(room);
-    const answer = Number(body.answer);
-    if (!Number.isInteger(answer) || answer < 0 || answer >= q.options.length) {
-      return json(res, 400, { error: 'Resposta inválida.' });
-    }
-    const elapsedMs = Date.now() - room.questionStartedAt;
-    const limitMs = room.quiz.timePerQuestion * 1000;
-    if (elapsedMs > limitMs + REVEAL_DELAY_MS) return json(res, 409, { error: 'Tempo esgotado.' });
-
-    const correct = answer === q.correct;
-    const points = computePoints(correct, elapsedMs, limitMs);
-    player.answers.set(room.questionIndex, { answer, ms: elapsedMs, correct, points });
-    player.score += points;
-    player.streak = correct ? player.streak + 1 : 0;
-    if (correct) player.correctCount++;
+    const result = registerAnswer(room, player, body);
+    if (result.error) return json(res, result.status, { error: result.error });
     touch(room);
 
     // Todos responderam? Revela na hora.

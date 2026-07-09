@@ -10,7 +10,7 @@
   }
 
   // ---- Tela inicial: entrar em um jogo com PIN (estilo kahoot.it) ----
-  function renderHome() {
+  function renderHome(prefillPin) {
     app.innerHTML = `
       <div class="card live-hero join-card">
         <div class="big" style="font-size:3rem">🎓</div>
@@ -18,7 +18,7 @@
         <p class="subtitle">Digite o PIN exibido no telão e o seu nome.</p>
         <div class="field">
           <input type="text" id="join-pin" class="join-input" inputmode="numeric" maxlength="6"
-                 placeholder="PIN do jogo" autocomplete="off">
+                 placeholder="PIN do jogo" autocomplete="off" value="${esc(prefillPin || '')}">
         </div>
         <div class="field">
           <input type="text" id="join-name" class="join-input" maxlength="40"
@@ -74,7 +74,9 @@
     [pinInput, nameInput].forEach(el =>
       el.addEventListener('keydown', e => { if (e.key === 'Enter') tryJoin(); })
     );
-    pinInput.focus();
+    // Veio pelo QR Code / link com PIN? Vai direto para o nome
+    if (prefillPin && prefillPin.length === 6) nameInput.focus();
+    else pinInput.focus();
   }
 
   function renderNotFound(message) {
@@ -97,6 +99,8 @@
 
     if (parts[0] === '' || parts[0] === undefined) {
       renderHome();
+    } else if (parts[0] === 'join' && parts[1]) {
+      renderHome(parts[1].replace(/\D/g, '').slice(0, 6));
     } else if (parts[0] === 'play' && parts[1]) {
       Live.renderPlayer(app, parts[1]);
     } else if (parts[0] === 'host' && parts[1]) {

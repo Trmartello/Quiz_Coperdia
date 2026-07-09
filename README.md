@@ -8,21 +8,28 @@ O instrutor projeta as perguntas no telão, os participantes entram pelo celular
 
 ### Instrutor
 1. Acesse **Administração** (PIN padrão: `1234` — altere na aba Configurações).
-2. Cadastre o treinamento e as questões (2 a 6 alternativas, tempo por questão e nota mínima configuráveis).
-3. Clique em **▶ Iniciar ao vivo** e projete a tela: ela exibe o PIN do jogo.
-4. Quando todos entrarem, clique em **Iniciar jogo**. Entre uma questão e outra o telão mostra a resposta correta, a distribuição das respostas e o ranking parcial.
+2. Cadastre o treinamento e as questões via modal, estilo Kahoot. Tipos de pergunta:
+   - **Quiz** — 2 a 6 alternativas coloridas, seleção simples ou múltipla escolha;
+   - **Verdadeiro ou falso**;
+   - **Enquete** — coleta opiniões, sem resposta certa e sem pontos;
+   - **Nuvem de palavras** — resposta livre curta que forma uma nuvem no telão.
+   Cada pergunta pode ter **imagem de mídia** e **imagens nas alternativas** (comprimidas no navegador),
+   **limite de tempo próprio** (com "aplicar a todas") e **pontos** (padrão, duplos ou nenhum).
+3. Clique em **▶ Iniciar ao vivo** e projete a tela: ela exibe o **PIN** e um **QR Code**, com botões
+   para **copiar o link** e **compartilhar no WhatsApp**.
+4. Quando todos entrarem, clique em **Iniciar jogo**. Entre uma questão e outra o telão mostra a resposta correta, a distribuição das respostas (ou a nuvem de palavras) e o ranking parcial.
 5. Ao final, o pódio é exibido e o resultado de todos (nota % e aprovação) é gravado na aba **Resultados**, com exportação para **CSV**.
 
 ### Participante
-1. Abra o endereço do sistema no celular.
-2. Digite o **PIN** exibido no telão e o seu **nome**.
-3. Responda cada questão tocando no botão colorido — quanto mais rápido acertar, mais pontos (500 a 1000 por acerto).
+1. Escaneie o **QR Code** do telão (o PIN já vem preenchido) ou abra o endereço e digite o **PIN** e o seu **nome**.
+2. Responda cada questão tocando no botão colorido — quanto mais rápido acertar, mais pontos (500 a 1000 por acerto).
 
 ## Regras de pontuação e aprovação
 
-- Acerto vale de **500 a 1000 pontos**, conforme a velocidade da resposta (fórmula estilo Kahoot).
-- Erro ou tempo esgotado: 0 pontos.
-- O ranking do jogo é por **pontos**; a **aprovação** é pelo **percentual de acertos** comparado à nota mínima do treinamento (ex.: 70%).
+- Acerto vale de **500 a 1000 pontos**, conforme a velocidade da resposta (fórmula estilo Kahoot); perguntas com **pontos duplos** valem o dobro.
+- Na **múltipla escolha**, é preciso marcar exatamente as alternativas corretas.
+- Erro ou tempo esgotado: 0 pontos. Enquetes e nuvens de palavras não pontuam.
+- O ranking do jogo é por **pontos**; a **aprovação** é pelo **percentual de acertos nas questões que valem nota** (quiz e verdadeiro/falso) comparado à nota mínima do treinamento (ex.: 70%).
 
 ## Executar localmente
 
@@ -52,12 +59,13 @@ npm start
 ## Estrutura do projeto
 
 ```
-├── index.html        # página única (SPA)
-├── css/style.css     # estilos (telão, celular, admin)
+├── index.html          # página única (SPA)
+├── css/style.css       # estilos (cores da marca Copérdia; telão, celular, admin)
 ├── js/
-│   ├── storage.js    # treinamentos, resultados e PIN (localStorage)
-│   ├── live.js       # jogo ao vivo: telas do instrutor e do participante
-│   ├── admin.js      # administração: treinamentos, questões, resultados, config
-│   └── app.js        # roteamento e tela de entrada (PIN)
-└── server.js         # servidor Node: arquivos estáticos + API do jogo (salas, SSE)
+│   ├── vendor/qrcode.js  # gerador de QR Code (qrcode-generator, MIT)
+│   ├── storage.js      # treinamentos, resultados e PIN (localStorage)
+│   ├── live.js         # jogo ao vivo: telas do instrutor e do participante
+│   ├── admin.js        # administração one-page: cadastros via modal estilo Kahoot
+│   └── app.js          # roteamento e tela de entrada (PIN / QR)
+└── server.js           # servidor Node: arquivos estáticos + API do jogo (salas, SSE)
 ```

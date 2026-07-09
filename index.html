@@ -10,7 +10,11 @@
 <body>
   <header class="topbar">
     <a href="#/" class="brand">
-      <span class="brand-icon">🎓</span>
+      <!-- Arcos da marca Copérdia -->
+      <svg class="brand-icon" viewBox="0 0 64 40" aria-hidden="true">
+        <path d="M4 36 A30 30 0 0 1 56 20 L47 27 A19 19 0 0 0 14 36 Z" fill="#0e9a44"/>
+        <path d="M22 36 A22 22 0 0 1 60 24 L52 30 A12 12 0 0 0 32 36 Z" fill="#f5a800"/>
+      </svg>
       <span>
         <strong>Quiz Copérdia</strong>
         <small>Validação de Treinamentos</small>
@@ -27,6 +31,9 @@
     Quiz Copérdia — ferramenta interna de validação de aprendizado
   </footer>
 
+  <div id="modal-root"></div>
+
+  <script src="js/vendor/qrcode.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/live.js"></script>
   <script src="js/admin.js"></script>

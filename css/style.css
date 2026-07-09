@@ -1,14 +1,16 @@
 /* ===== Quiz Copérdia — estilos ===== */
+/* Paleta extraída da logomarca Copérdia: verde do arco + laranja/amarelo do arco de destaque */
 :root {
-  --primary: #0b7d43;
-  --primary-dark: #075c31;
-  --primary-light: #e6f4ec;
-  --accent: #f5a623;
+  --primary: #0e9a44;
+  --primary-dark: #0a6e31;
+  --primary-light: #e7f5ec;
+  --accent: #f5a800;
+  --accent-dark: #d18f00;
   --danger: #d64545;
   --danger-light: #fdecec;
-  --success: #1e9e5a;
-  --success-light: #e7f7ee;
-  --text: #21302a;
+  --success: #0e9a44;
+  --success-light: #e7f5ec;
+  --text: #1d1d1b; /* preto do letreiro */
   --text-muted: #64716b;
   --bg: #f4f7f5;
   --card: #ffffff;
@@ -30,7 +32,8 @@ body {
 
 /* ===== Topbar ===== */
 .topbar {
-  background: var(--primary);
+  background: linear-gradient(100deg, var(--primary-dark), var(--primary) 70%);
+  border-bottom: 3px solid var(--accent);
   color: #fff;
   display: flex;
   align-items: center;
@@ -46,7 +49,13 @@ body {
   text-decoration: none;
   line-height: 1.15;
 }
-.brand-icon { font-size: 1.8rem; }
+.brand-icon {
+  width: 44px;
+  height: 28px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 3px 4px;
+}
 .brand strong { display: block; font-size: 1.1rem; }
 .brand small { display: block; opacity: 0.85; font-size: 0.75rem; }
 .nav-link {
@@ -280,6 +289,117 @@ tr:hover td { background: var(--primary-light); }
 .pill-pass { background: var(--success-light); color: var(--success); }
 .pill-fail { background: var(--danger-light); color: var(--danger); }
 
+/* ===== Modal ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 35, 26, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4vh 16px;
+  z-index: 100;
+  overflow-y: auto;
+}
+.modal {
+  position: relative;
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  padding: 26px;
+  width: 100%;
+  max-width: 520px;
+  animation: modal-in 0.18s ease;
+}
+.modal-wide { max-width: 900px; }
+@keyframes modal-in { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+}
+.modal-close:hover { color: var(--danger); }
+
+/* ===== Editor de questão (estilo Kahoot) ===== */
+.q-editor { display: grid; grid-template-columns: 1fr 250px; gap: 22px; margin-top: 12px; }
+.q-editor-props {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.q-editor-props h3 { font-size: 0.95rem; margin-bottom: 14px; }
+@media (max-width: 720px) { .q-editor { grid-template-columns: 1fr; } }
+
+.opt-chip {
+  flex: 0 0 30px;
+  height: 30px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.opt-chip.red { background: #e21b3c; }
+.opt-chip.blue { background: #1368ce; }
+.opt-chip.yellow { background: #d89e00; }
+.opt-chip.green { background: #26890c; }
+.opt-chip.purple { background: #7b2ff2; }
+.opt-chip.orange { background: #e06000; }
+.opt-thumb { width: 26px; height: 26px; object-fit: cover; border-radius: 4px; display: block; }
+
+.q-media-edit {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+  margin-bottom: 16px;
+}
+.q-media-edit.has-img { display: flex; align-items: center; gap: 14px; justify-content: center; }
+.q-media-edit img { max-height: 120px; max-width: 240px; border-radius: 8px; }
+
+.type-badge {
+  display: inline-block;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  margin-right: 4px;
+}
+.questions-area { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 14px; }
+
+/* ===== Mídia da pergunta / imagens das alternativas ===== */
+.q-media { text-align: center; margin: 6px 0 16px; }
+.q-media img { max-height: 260px; max-width: 100%; border-radius: 10px; box-shadow: var(--shadow); }
+.q-media.small img { max-height: 170px; }
+.opt-img { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; background: #fff; flex: 0 0 auto; }
+
+/* ===== Nuvem de palavras ===== */
+.word-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px 18px;
+  padding: 22px 8px;
+}
+.cloud-word { font-weight: 700; line-height: 1.1; }
+.cloud-word small { font-size: 0.65em; color: var(--text-muted); margin-left: 3px; font-weight: 600; }
+.cloud-word.c0 { color: var(--primary); }
+.cloud-word.c1 { color: var(--accent-dark); }
+.cloud-word.c2 { color: #1368ce; }
+.cloud-word.c3 { color: #7b2ff2; }
+.cloud-word.c4 { color: var(--text); }
+
 /* ===== Jogo ao vivo (estilo Kahoot) ===== */
 .live-hero { text-align: center; padding: 34px 24px; }
 .live-hero .subtitle { margin-bottom: 12px; }
@@ -359,6 +479,23 @@ tr:hover td { background: var(--primary-light); }
 .live-option.orange { background: #e06000; }
 .live-option.is-dim { opacity: 0.35; }
 .live-option.is-correct { outline: 4px solid #fff; box-shadow: 0 0 0 7px var(--success); }
+.live-option.is-selected { outline: 4px solid #fff; box-shadow: 0 0 0 7px var(--accent); }
+.live-options.tf { grid-template-columns: 1fr 1fr; }
+.live-options.tf .live-option { min-height: 90px; font-size: 1.15rem; justify-content: center; }
+
+/* Lobby: PIN + QR lado a lado */
+.lobby-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 34px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.qr-wrap { text-align: center; }
+#qr-box svg { width: 170px; height: 170px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.btn-whatsapp { background: #25d366; color: #fff; }
+.btn-whatsapp:hover { filter: brightness(1.08); }
 
 .dist-bars {
   display: flex;
@@ -389,6 +526,18 @@ tr:hover td { background: var(--primary-light); }
 .rank-pos { font-weight: 800; color: var(--primary-dark); width: 34px; }
 .rank-name { flex: 1; font-weight: 600; }
 .rank-score { font-variant-numeric: tabular-nums; color: var(--text-muted); font-weight: 700; }
+.rank-delta {
+  width: 44px;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+.rank-delta.up { color: var(--success); }
+.rank-delta.down { color: var(--danger); }
+.rank-move { margin-top: 12px; font-weight: 700; }
+.rank-move.up { color: var(--success); }
+.rank-move.down { color: var(--danger); }
 
 .podium {
   display: flex;
