@@ -587,9 +587,29 @@ tr:hover td { background: var(--primary-light); }
   align-items: flex-end;
   justify-content: center;
   gap: 18px;
-  height: 100px;
   margin-top: 22px;
 }
+.dist-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.dist-count {
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1;
+}
+.dist-count small { font-weight: 600; color: #667; }
+.dist-shape { font-size: 0.95rem; font-weight: 700; line-height: 1; }
+.dist-shape.red { color: #e21b3c; }
+.dist-shape.blue { color: #1368ce; }
+.dist-shape.yellow { color: #d89e00; }
+.dist-shape.green { color: #26890c; }
+.dist-shape.purple { color: #7b2ff2; }
+.dist-shape.orange { color: #e06000; }
 .dist-bar { width: 44px; border-radius: 6px 6px 0 0; }
 .dist-bar.red { background: #e21b3c; }
 .dist-bar.blue { background: #1368ce; }
@@ -598,6 +618,14 @@ tr:hover td { background: var(--primary-light); }
 .dist-bar.purple { background: #7b2ff2; }
 .dist-bar.orange { background: #e06000; }
 
+/* Ranking parcial em duas colunas (1º–5º à esquerda, 6º–10º à direita) */
+.rank-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(5, auto);
+  grid-auto-flow: column;
+  column-gap: 14px;
+}
 .rank-row {
   display: flex;
   align-items: center;
@@ -643,6 +671,7 @@ tr:hover td { background: var(--primary-light); }
 @media (max-width: 480px) {
   .live-options { grid-template-columns: 1fr; }
   .podium-place { width: 92px; }
+  .rank-grid { grid-template-columns: 1fr; grid-template-rows: none; grid-auto-flow: row; }
 }
 
 /* ===== Diversos ===== */

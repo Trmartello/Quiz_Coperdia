@@ -35,9 +35,10 @@
         </div>
         <p class="muted" id="join-error" style="color:var(--danger);display:none"></p>
         <button class="btn btn-primary btn-lg" id="btn-join">Entrar</button>
+        ${prefillPin ? '' : `
         <p class="muted" style="margin-top:22px">
           É o instrutor? Acesse a <a href="#/admin">Administração</a> para criar quizzes e iniciar um jogo.
-        </p>
+        </p>`}
       </div>
     `;
 
@@ -116,6 +117,10 @@
     Live.stop(); // encerra conexões/timers da tela anterior
     const hash = location.hash || '#/';
     const parts = hash.replace(/^#\//, '').split('/');
+
+    // Participante (QR Code / link / jogo) não vê o acesso à administração no topo
+    const nav = document.querySelector('.topbar nav');
+    if (nav) nav.style.display = (parts[0] === 'join' || parts[0] === 'play') ? 'none' : '';
 
     if (parts[0] === '' || parts[0] === undefined) {
       renderHome();

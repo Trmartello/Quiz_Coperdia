@@ -63,6 +63,7 @@ const Store = (() => {
       options: ['', '', '', ''],
       corrects: [0],         // índices corretos (quiz/tf); vazio em poll/wordcloud
       multi: false,          // quiz: múltipla escolha (selecionar várias antes de enviar)
+      maxAnswers: 1,         // wordcloud: quantas respostas cada participante pode enviar (1 a 5)
       timeLimit: null,       // segundos; null = usa o padrão do treinamento
       points: 'standard',    // standard | double | none
       ...data,
@@ -86,7 +87,12 @@ const Store = (() => {
       n.multi = false;
       n.points = 'none';
     }
-    if (n.type === 'wordcloud') n.options = [];
+    if (n.type === 'wordcloud') {
+      n.options = [];
+      n.maxAnswers = Math.min(5, Math.max(1, Math.round(Number(n.maxAnswers)) || 1));
+    } else {
+      n.maxAnswers = 1;
+    }
     return n;
   }
 

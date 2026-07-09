@@ -85,6 +85,7 @@ function sanitizeQuiz(quiz) {
       corrects: [],
       multi: false,
       timeLimit: null,
+      maxAnswers: 1, // nuvem de palavras: quantas respostas cada participante pode enviar
       pointsMultiplier: POINTS_MULTIPLIER[raw.points] !== undefined
         ? POINTS_MULTIPLIER[raw.points] : 1,
     };
@@ -128,6 +129,10 @@ function sanitizeQuiz(quiz) {
       if (!q.multi && q.corrects.length > 1) q.corrects = [q.corrects[0]];
     } else {
       q.pointsMultiplier = 0; // enquete e nuvem de palavras não pontuam
+      if (type === 'wordcloud') {
+        const m = Math.round(Number(raw.maxAnswers));
+        q.maxAnswers = m >= 1 && m <= 5 ? m : 1;
+      }
     }
     questions.push(q);
   }
@@ -210,11 +215,15 @@ function wordCloud(room) {
   const words = new Map(); // chave minúscula -> { text, count }
   for (const p of room.players.values()) {
     const a = p.answers.get(room.questionIndex);
-    if (!a || typeof a.value !== 'string') continue;
-    const key = a.value.toLowerCase();
-    const entry = words.get(key) || { text: a.value, count: 0 };
-    entry.count++;
-    words.set(key, entry);
+    if (!a) continue;
+    const values = Array.isArray(a.value) ? a.value : (typeof a.value === 'string' ? [a.value] : []);
+    for (const v of values) {
+      if (typeof v !== 'string' || !v) continue;
+      const key = v.toLowerCase();
+      const entry = words.get(key) || { text: v, count: 0 };
+      entry.count++;
+      words.set(key, entry);
+    }
   }
   return [...words.values()].sort((a, b) => b.count - a.count).slice(0, 60);
 }
@@ -233,7 +242,8 @@ function questionPublic(q) {
   return {
     type: q.type, text: q.text, image: q.image,
     options: q.options, optionImages: q.optionImages,
-    multi: q.multi, isScored: q.pointsMultiplier > 0,
+    multi: q.multi, maxAnswers: q.maxAnswers || 1,
+    isScored: q.pointsMultiplier > 0,
   };
 }
 
@@ -275,7 +285,8 @@ function snapshotFor(room, conn) {
     }
     base.showRanking = room.quiz.showRanking;
     if (room.quiz.showRanking) {
-      base.leaderboard = leaderboard(room).slice(0, 5)
+      // top 10 — o telão exibe em duas colunas de 5
+      base.leaderboard = leaderboard(room).slice(0, 10)
         .map(p => ({ ...p, delta: room.rankDeltas.get(p.id) || 0 }));
     }
     base.isLast = room.questionIndex + 1 >= room.quiz.questions.length;
@@ -368,9 +379,22 @@ function registerAnswer(room, player, body) {
   let value, correct = null;
 
   if (q.type === 'wordcloud') {
-    const text = String(body.answer || '').trim().replace(/\s+/g, ' ').slice(0, 30);
-    if (!text) return { error: 'Digite uma resposta.', status: 400 };
-    value = text;
+    // Aceita uma string (clientes antigos) ou uma lista de até maxAnswers textos
+    const raw = Array.isArray(body.answer) ? body.answer : [body.answer];
+    const seen = new Set();
+    const texts = [];
+    for (const item of raw) {
+      if (typeof item !== 'string' && typeof item !== 'number') continue;
+      const text = String(item).trim().replace(/\s+/g, ' ').slice(0, 30);
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (seen.has(key)) continue; // ignora repetições do mesmo participante
+      seen.add(key);
+      texts.push(text);
+      if (texts.length >= (q.maxAnswers || 1)) break;
+    }
+    if (texts.length === 0) return { error: 'Digite uma resposta.', status: 400 };
+    value = texts;
   } else if (q.multi) {
     const arr = Array.isArray(body.answer) ? body.answer : null;
     if (!arr || arr.length === 0) return { error: 'Selecione ao menos uma alternativa.', status: 400 };
@@ -538,12 +562,22 @@ function serveStatic(req, res, urlPath) {
     filePath = path.join(ROOT, 'index.html');
   }
   const ext = path.extname(filePath).toLowerCase();
+  // no-cache = o navegador revalida a cada carga; após um deploy, todos recebem o JS novo
+  const lastModified = fs.statSync(filePath).mtime.toUTCString();
+  if (req.headers['if-modified-since'] === lastModified) {
+    res.writeHead(304, { 'Cache-Control': 'no-cache', 'Last-Modified': lastModified });
+    return res.end();
+  }
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(500);
       return res.end('Internal Server Error');
     }
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': 'no-cache',
+      'Last-Modified': lastModified,
+    });
     res.end(data);
   });
 }

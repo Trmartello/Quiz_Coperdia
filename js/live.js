@@ -281,6 +281,7 @@ const Live = (() => {
           <div class="empty-state" style="padding:26px 0">
             <div class="big">☁️</div>
             <p class="muted">Os participantes estão digitando as respostas nos celulares...</p>
+            ${(q.maxAnswers || 1) > 1 ? `<p class="muted">Cada participante pode enviar até ${q.maxAnswers} respostas.</p>` : ''}
           </div>
         ` : optionsHtml(q)}
         ${q.multi ? '<p class="muted" style="text-align:center;margin-top:10px">Múltipla escolha: selecione todas as corretas e envie</p>' : ''}
@@ -307,7 +308,14 @@ const Live = (() => {
         <div class="dist-bars">
           ${q.options.map((o, i) => {
             const color = q.type === 'tf' ? (i === 0 ? 'blue' : 'red') : COLORS[i];
-            return `<div class="dist-bar ${color}" style="height:${Math.max(6, (s.counts[i] / total) * 90)}px" title="${s.counts[i]}"></div>`;
+            const shape = q.type === 'tf' ? (i === 0 ? '✔' : '✖') : SHAPES[i];
+            const pct = Math.round((s.counts[i] / total) * 100);
+            return `
+              <div class="dist-col">
+                <span class="dist-count">${s.counts[i]} <small>(${pct}%)</small></span>
+                <div class="dist-bar ${color}" style="height:${Math.max(6, (s.counts[i] / total) * 90)}px"></div>
+                <span class="dist-shape ${color}">${shape}</span>
+              </div>`;
           }).join('')}
         </div>
       `;
@@ -329,13 +337,15 @@ const Live = (() => {
         ${!scored ? '<p class="muted">Esta pergunta não vale pontos — obrigado pelas opiniões! 💬</p>'
           : s.showRanking ? `
           <h2>🏆 Ranking parcial</h2>
-          ${s.leaderboard.map(p => `
-            <div class="rank-row">
-              <span class="rank-pos">${p.rank}º</span>
-              ${deltaBadge(p.delta)}
-              <span class="rank-name"><span class="rank-avatar">${esc(p.avatar || '🙂')}</span> ${esc(p.name)}</span>
-              <span class="rank-score">${p.score} pts</span>
-            </div>`).join('')}
+          <div class="rank-grid">
+            ${s.leaderboard.map(p => `
+              <div class="rank-row">
+                <span class="rank-pos">${p.rank}º</span>
+                ${deltaBadge(p.delta)}
+                <span class="rank-name"><span class="rank-avatar">${esc(p.avatar || '🙂')}</span> ${esc(p.name)}</span>
+                <span class="rank-score">${p.score} pts</span>
+              </div>`).join('')}
+          </div>
         ` : '<p class="muted">Ranking oculto durante o jogo — a classificação aparece no pódio final. 🤫</p>'}
         <div class="btn-row" style="justify-content:flex-end">
           <button class="btn btn-primary" id="btn-next">${s.isLast ? '🏁 Ver pódio' : 'Próxima questão →'}</button>
@@ -639,29 +649,38 @@ const Live = (() => {
     if (s.answered) return drawWaiting(container);
     const q = s.question;
 
-    // Nuvem de palavras: campo de texto livre
+    // Nuvem de palavras: campos de texto livre (até q.maxAnswers respostas por participante)
     if (q.type === 'wordcloud') {
+      const max = Math.max(1, q.maxAnswers || 1);
       container.innerHTML = `
         <div class="card">
           ${timerHeader(s)}
           <p class="question-text">${esc(q.text)}</p>
           ${mediaHtml(q, 'small')}
-          <div class="field">
-            <input type="text" id="cloud-answer" maxlength="30" placeholder="Digite sua resposta (1 a 3 palavras)" autocomplete="off">
-          </div>
-          <button class="btn btn-primary btn-lg" id="btn-send">Enviar resposta</button>
+          ${max > 1 ? `<p class="muted" style="margin-bottom:10px">☁️ Você pode enviar até ${max} respostas — preencha quantas quiser.</p>` : ''}
+          ${Array.from({ length: max }, (_, i) => `
+            <div class="field">
+              <input type="text" class="cloud-answer" maxlength="30" autocomplete="off"
+                     placeholder="${max > 1 ? `Resposta ${i + 1}${i > 0 ? ' (opcional)' : ''}` : 'Digite sua resposta (palavra ou frase curta)'}">
+            </div>`).join('')}
+          <button class="btn btn-primary btn-lg" id="btn-send">Enviar ${max > 1 ? 'respostas' : 'resposta'}</button>
         </div>
       `;
       startCountdown(container, s.remainingMs, s.limitMs);
-      const input = container.querySelector('#cloud-answer');
+      const inputs = [...container.querySelectorAll('.cloud-answer')];
       const send = () => {
-        const text = input.value.trim();
-        if (!text) { input.focus(); return; }
-        sendAnswer(container, s, text);
+        const texts = inputs.map(inp => inp.value.trim()).filter(Boolean);
+        if (texts.length === 0) { inputs[0].focus(); return; }
+        sendAnswer(container, s, texts);
       };
       container.querySelector('#btn-send').addEventListener('click', send);
-      input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
-      input.focus();
+      inputs.forEach((inp, i) => inp.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        // Enter avança para o próximo campo vazio; no último, envia
+        const next = inputs.slice(i + 1).find(x => !x.value.trim());
+        if (next) next.focus(); else send();
+      }));
+      inputs[0].focus();
       return;
     }
 

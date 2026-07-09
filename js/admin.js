@@ -146,7 +146,9 @@ const Admin = (() => {
             </li>`).join('')}
         </ol>`;
     } else {
-      detail = '<p class="muted" style="margin-top:6px">Resposta livre — forma uma nuvem de palavras no telão.</p>';
+      const n = q.maxAnswers || 1;
+      detail = `<p class="muted" style="margin-top:6px">Resposta livre — forma uma nuvem de palavras no telão
+        (${n === 1 ? '1 resposta' : 'até ' + n + ' respostas'} por participante).</p>`;
     }
     return `
       <div class="question-card" data-qid="${q.id}">
@@ -363,8 +365,8 @@ const Admin = (() => {
 
             ${type === 'wordcloud' ? `
               <div class="notice notice-info">
-                ☁️ Os participantes digitam uma resposta curta e livre. As respostas formam uma
-                nuvem de palavras no telão. Não há resposta certa nem pontos.
+                ☁️ Os participantes digitam respostas curtas e livres (palavras ou frases). As respostas
+                formam uma nuvem de palavras no telão. Não há resposta certa nem pontos.
               </div>` : ''}
 
             ${type === 'tf' ? `
@@ -429,6 +431,17 @@ const Admin = (() => {
                 </select>
                 <p class="muted" style="margin-top:4px;font-size:0.78rem">${Store.POINTS_OPTIONS[q.points].desc}</p>
               </div>` : ''}
+            ${type === 'wordcloud' ? `
+              <div class="field">
+                <label for="q-max">💬 Respostas por participante</label>
+                <select id="q-max">
+                  ${[1, 2, 3, 4, 5].map(n =>
+                    `<option value="${n}" ${n === (q.maxAnswers || 1) ? 'selected' : ''}>${n === 1 ? '1 resposta' : n + ' respostas'}</option>`).join('')}
+                </select>
+                <p class="muted" style="margin-top:4px;font-size:0.78rem">
+                  Quantas palavras ou frases cada participante pode enviar para a nuvem.
+                </p>
+              </div>` : ''}
             ${type === 'quiz' ? `
               <div class="field">
                 <label for="q-mode">☑️ Opções de resposta</label>
@@ -464,6 +477,8 @@ const Admin = (() => {
         if (timeEl) q.timeLimit = timeEl.value ? Number(timeEl.value) : null;
         const pointsEl = modal.querySelector('#q-points');
         if (pointsEl) q.points = pointsEl.value;
+        const maxEl = modal.querySelector('#q-max');
+        if (maxEl) q.maxAnswers = Number(maxEl.value) || 1;
       };
 
       /* --- troca de tipo --- */
@@ -481,6 +496,7 @@ const Admin = (() => {
           q.corrects = [];
           q.multi = false;
           q.points = 'none';
+          q.maxAnswers = q.maxAnswers || 1;
         } else if (q.type === 'poll') {
           if (q.options.length < 2) { q.options = ['', '']; q.optionImages = [null, null]; }
           q.corrects = [];
