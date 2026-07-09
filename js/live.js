@@ -179,52 +179,81 @@ const Live = (() => {
     return `${location.origin}${location.pathname}#/join/${Host.pin}`;
   }
 
-  function drawQr(container) {
-    const el = container.querySelector('#qr-box');
-    if (!el || typeof qrcode !== 'function') return;
+  function qrSvg() {
+    if (typeof qrcode !== 'function') return null;
     try {
       const qr = qrcode(0, 'M'); // 0 = tamanho automático
       qr.addData(joinUrl());
       qr.make();
-      el.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+      return qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
     } catch {
-      el.style.display = 'none';
+      return null;
     }
+  }
+
+  function drawQr(container) {
+    const el = container.querySelector('#qr-box');
+    if (!el) return;
+    const svg = qrSvg();
+    if (!svg) { el.style.display = 'none'; return; }
+    el.innerHTML = svg;
+    el.title = 'Clique para ampliar';
+    el.addEventListener('click', openQrZoom);
+    const zoomBtn = container.querySelector('#btn-qr-zoom');
+    if (zoomBtn) zoomBtn.addEventListener('click', openQrZoom);
+  }
+
+  // QR em tela cheia para leitura a longa distância (fora do #app: sobrevive aos re-renders do lobby)
+  function openQrZoom() {
+    const svg = qrSvg();
+    if (!svg) return;
+    const root = document.getElementById('modal-root');
+    root.innerHTML = `
+      <div class="qr-zoom" role="dialog" aria-modal="true">
+        <div class="qr-zoom-box">${svg}</div>
+        <div class="qr-zoom-pin">PIN ${Host.pin}</div>
+        <p>Aponte a câmera do celular • toque em qualquer lugar para fechar</p>
+      </div>
+    `;
+    root.querySelector('.qr-zoom').addEventListener('click', () => { root.innerHTML = ''; });
   }
 
   function drawHostLobby(container, s) {
     const url = joinUrl();
     const shareText = `Participe do quiz "${s.quizName}"! Acesse ${url} ou entre em ${location.host} com o PIN ${Host.pin}.`;
     container.innerHTML = `
-      <div class="card live-hero">
-        <p class="muted">${esc(s.quizName)}</p>
-        <div class="lobby-grid">
-          <div>
-            <h1 style="margin:6px 0">Entre em <strong>${esc(location.host)}</strong></h1>
-            <p class="muted">e digite o PIN do jogo:</p>
-            <div class="game-pin">${Host.pin}</div>
-            <div class="btn-row" style="justify-content:center">
-              <button class="btn btn-secondary btn-sm" id="btn-copy">📋 Copiar link</button>
-              <a class="btn btn-whatsapp btn-sm" id="btn-whats" target="_blank" rel="noopener"
-                 href="https://wa.me/?text=${encodeURIComponent(shareText)}">💬 WhatsApp</a>
-            </div>
-          </div>
+      <div class="lobby-layout">
+        <div class="card live-hero lobby-main">
+          <p class="muted">${esc(s.quizName)}</p>
+          <h1 style="margin:6px 0">Entre em <strong>${esc(location.host)}</strong></h1>
+          <p class="muted">e digite o PIN do jogo:</p>
+          <div class="game-pin">${Host.pin}</div>
           <div class="qr-wrap">
             <div id="qr-box"></div>
             <p class="muted" style="font-size:0.78rem">Aponte a câmera para entrar direto</p>
           </div>
+          <div class="btn-row" style="justify-content:center">
+            <button class="btn btn-secondary btn-sm" id="btn-qr-zoom">🔍 Ampliar QR</button>
+            <button class="btn btn-secondary btn-sm" id="btn-copy">📋 Copiar link</button>
+            <a class="btn btn-whatsapp btn-sm" id="btn-whats" target="_blank" rel="noopener"
+               href="https://wa.me/?text=${encodeURIComponent(shareText)}">💬 WhatsApp</a>
+          </div>
+          <p class="muted" id="conn-note"></p>
         </div>
-        <p class="muted" id="conn-note"></p>
-      </div>
-      <div class="card">
-        <div class="quiz-header">
-          <h2 style="margin:0">Participantes (${s.playersCount})</h2>
-          <button class="btn btn-primary" id="btn-start" ${s.playersCount === 0 ? 'disabled' : ''}>▶ Iniciar jogo</button>
-        </div>
-        <div class="player-chips">
-          ${s.players && s.players.length
-            ? s.players.map(n => `<span class="chip">${esc(n)}</span>`).join('')
-            : '<p class="muted">Aguardando participantes entrarem...</p>'}
+        <div class="card lobby-side">
+          <div class="quiz-header">
+            <h2 style="margin:0">Participantes (${s.playersCount})</h2>
+          </div>
+          <div class="player-chips">
+            ${s.players && s.players.length
+              ? s.players.map((p, i) => `
+                  <span class="chip">
+                    <span class="chip-avatar" style="animation-delay:${(i % 7) * 0.25}s">${esc(p.avatar || '🙂')}</span>
+                    ${esc(p.name)}
+                  </span>`).join('')
+              : '<p class="muted">Aguardando participantes entrarem...</p>'}
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-start" style="margin-top:16px" ${s.playersCount === 0 ? 'disabled' : ''}>▶ Iniciar jogo</button>
         </div>
       </div>
     `;
@@ -304,7 +333,7 @@ const Live = (() => {
             <div class="rank-row">
               <span class="rank-pos">${p.rank}º</span>
               ${deltaBadge(p.delta)}
-              <span class="rank-name">${esc(p.name)}</span>
+              <span class="rank-name"><span class="rank-avatar">${esc(p.avatar || '🙂')}</span> ${esc(p.name)}</span>
               <span class="rank-score">${p.score} pts</span>
             </div>`).join('')}
         ` : '<p class="muted">Ranking oculto durante o jogo — a classificação aparece no pódio final. 🤫</p>'}
@@ -347,6 +376,7 @@ const Live = (() => {
           ${[1, 0, 2].filter(i => podium[i]).map(i => `
             <div class="podium-place p${i + 1}">
               <div class="medal">${medals[i]}</div>
+              <div class="podium-avatar">${esc(podium[i].avatar || '🙂')}</div>
               <div class="podium-name">${esc(podium[i].name)}</div>
               <div class="podium-score">${podium[i].score} pts</div>
               <div class="podium-bar"></div>
@@ -367,7 +397,7 @@ const Live = (() => {
               ${s.results.map(r => `
                 <tr>
                   <td>${r.rank}º</td>
-                  <td>${esc(r.name)}</td>
+                  <td>${esc(r.avatar || '')} ${esc(r.name)}</td>
                   <td>${r.score}</td>
                   <td>${r.correct}/${s.scorableTotal}</td>
                   <td><strong>${r.percent === null ? '—' : r.percent + '%'}</strong></td>
@@ -379,22 +409,165 @@ const Live = (() => {
           </table>
         </div>
         <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-podium-csv">⬇ Baixar CSV</button>
+          <button class="btn btn-secondary" id="btn-podium-pdf">🖨 Baixar PDF</button>
+          <button class="btn btn-whatsapp" id="btn-podium-whats">💬 Compartilhar no WhatsApp</button>
+        </div>
+        <div class="btn-row">
           <a href="#/admin" class="btn btn-primary">Ir para a administração</a>
           <a href="#/" class="btn btn-ghost">Tela inicial</a>
         </div>
       </div>
     `;
+
+    container.querySelector('#btn-podium-csv').addEventListener('click', () => exportCsv(s));
+    container.querySelector('#btn-podium-pdf').addEventListener('click', () => exportPdf(s));
+    container.querySelector('#btn-podium-whats').addEventListener('click', e => shareWhatsapp(s, e.target));
+  }
+
+  /* ---------- Exportações do pódio ---------- */
+
+  function resultRows(s) {
+    return s.results.map(r => ({
+      rank: r.rank,
+      name: r.name,
+      avatar: r.avatar || '',
+      score: r.score,
+      correct: `${r.correct}/${s.scorableTotal}`,
+      percent: r.percent === null ? '—' : r.percent + '%',
+      status: r.passed === null ? 'Participou' : (r.passed ? 'Aprovado' : 'Reprovado'),
+    }));
+  }
+
+  function exportCsv(s) {
+    const header = ['Posicao', 'Participante', 'Pontos', 'Acertos', 'Nota (%)', 'Situacao'];
+    const csvEsc = v => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [header.join(';')].concat(resultRows(s).map(r =>
+      [r.rank + 'º', r.name, r.score, r.correct, r.percent, r.status].map(csvEsc).join(';')));
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `resultado-${s.quizName.replace(/[^\w\d-]+/g, '-').toLowerCase()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  // Abre uma janela formatada para impressão — o usuário salva como PDF
+  function exportPdf(s) {
+    const rows = resultRows(s);
+    const w = window.open('', '_blank');
+    if (!w) { alert('Permita pop-ups para gerar o PDF.'); return; }
+    w.document.write(`
+      <!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+      <title>Resultado — ${esc(s.quizName)}</title>
+      <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; color: #1d1d1b; padding: 32px; }
+        h1 { color: #0a6e31; margin-bottom: 2px; font-size: 1.4rem; }
+        .sub { color: #667; margin-bottom: 4px; }
+        .meta { color: #667; font-size: 0.85rem; margin-bottom: 22px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border-bottom: 1px solid #cfd8d2; text-align: left; padding: 9px 12px; font-size: 0.9rem; }
+        th { color: #0a6e31; text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.05em; }
+        .pass { color: #0e9a44; font-weight: 700; }
+        .fail { color: #d64545; font-weight: 700; }
+        .top { background: #e7f5ec; }
+        .footer { margin-top: 26px; font-size: 0.75rem; color: #889; }
+        @media print { .no-print { display: none; } }
+      </style></head><body>
+      <h1>🎓 Quiz Copérdia — Resultado Final</h1>
+      <p class="sub"><strong>${esc(s.quizName)}</strong></p>
+      <p class="meta">${new Date().toLocaleString('pt-BR')} • ${rows.length} participante(s) •
+        aprovação a partir de ${s.passScore}% em ${s.scorableTotal} questão(ões) que valem nota</p>
+      <table>
+        <thead><tr><th>#</th><th>Participante</th><th>Pontos</th><th>Acertos</th><th>Nota</th><th>Situação</th></tr></thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr class="${r.rank === 1 ? 'top' : ''}">
+              <td>${r.rank}º</td><td>${r.avatar} ${esc(r.name)}</td><td>${r.score}</td>
+              <td>${r.correct}</td><td><strong>${r.percent}</strong></td>
+              <td class="${r.status === 'Aprovado' ? 'pass' : r.status === 'Reprovado' ? 'fail' : ''}">${r.status}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <p class="footer">Gerado pelo Quiz Copérdia — validação de aprendizado em treinamentos.</p>
+      <script>window.onload = () => setTimeout(() => window.print(), 300);<\/script>
+      </body></html>
+    `);
+    w.document.close();
+  }
+
+  // Compartilhar: no celular envia uma IMAGEM do resultado (Web Share); no desktop abre o WhatsApp com o resumo
+  async function shareWhatsapp(s, btn) {
+    const rows = resultRows(s);
+    try {
+      const blob = await resultImage(s, rows);
+      const file = new File([blob], 'resultado-quiz.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `Resultado — ${s.quizName}` });
+        return;
+      }
+    } catch { /* cai para o texto */ }
+    const top = rows.slice(0, 3).map(r => `${['🥇','🥈','🥉'][r.rank - 1] || r.rank + 'º'} ${r.name} — ${r.score} pts`).join('\n');
+    const approved = rows.filter(r => r.status === 'Aprovado').length;
+    const text = `🏁 Resultado do quiz "${s.quizName}"\n\n${top}\n\n` +
+      (s.scorableTotal > 0 ? `✅ ${approved} de ${rows.length} participantes aprovados (nota mínima ${s.passScore}%).` : `${rows.length} participantes.`);
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+  }
+
+  // Desenha o resultado num canvas e devolve um PNG (para o Web Share)
+  function resultImage(s, rows) {
+    const W = 900;
+    const rowH = 46;
+    const top = 170;
+    const H = top + rows.length * rowH + 90;
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#0e9a44'; ctx.fillRect(0, 0, W, 86);
+    ctx.fillStyle = '#f5a800'; ctx.fillRect(0, 86, W, 5);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 30px Segoe UI, Arial';
+    ctx.fillText('🎓 Quiz Copérdia — Resultado Final', 28, 54);
+    ctx.fillStyle = '#1d1d1b';
+    ctx.font = 'bold 22px Segoe UI, Arial';
+    ctx.fillText(s.quizName.slice(0, 60), 28, 128);
+    ctx.fillStyle = '#667';
+    ctx.font = '15px Segoe UI, Arial';
+    ctx.fillText(`${new Date().toLocaleString('pt-BR')} • ${rows.length} participante(s)` +
+      (s.scorableTotal > 0 ? ` • nota mínima ${s.passScore}%` : ''), 28, 154);
+    rows.forEach((r, i) => {
+      const y = top + i * rowH;
+      if (r.rank === 1) { ctx.fillStyle = '#e7f5ec'; ctx.fillRect(16, y - 30, W - 32, rowH - 6); }
+      ctx.fillStyle = '#0a6e31';
+      ctx.font = 'bold 19px Segoe UI, Arial';
+      ctx.fillText(`${r.rank}º`, 28, y);
+      ctx.fillStyle = '#1d1d1b';
+      ctx.font = '19px Segoe UI, Arial';
+      ctx.fillText(`${r.avatar} ${r.name}`.slice(0, 34), 84, y);
+      ctx.fillText(`${r.score} pts`, 470, y);
+      ctx.fillText(r.percent, 610, y);
+      ctx.fillStyle = r.status === 'Aprovado' ? '#0e9a44' : r.status === 'Reprovado' ? '#d64545' : '#667';
+      ctx.font = 'bold 19px Segoe UI, Arial';
+      ctx.fillText(r.status, 710, y);
+    });
+    ctx.fillStyle = '#889';
+    ctx.font = '13px Segoe UI, Arial';
+    ctx.fillText('Gerado pelo Quiz Copérdia — validação de aprendizado em treinamentos.', 28, H - 30);
+    return new Promise((resolve, reject) =>
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('canvas')), 'image/png'));
   }
 
   /* ==================== PARTICIPANTE (player) ==================== */
 
-  const Player = { pin: null, id: null, name: null };
+  const Player = { pin: null, id: null, name: null, avatar: null };
 
-  async function join(pin, name) {
-    const data = await api(`/api/rooms/${pin}/join`, { name });
+  async function join(pin, name, avatar) {
+    const data = await api(`/api/rooms/${pin}/join`, { name, avatar });
     Player.pin = pin;
     Player.id = data.playerId;
     Player.name = data.name;
+    Player.avatar = data.avatar;
     sessionStorage.setItem('qc_player', JSON.stringify(Player));
     return data;
   }
@@ -432,7 +605,7 @@ const Live = (() => {
   function drawPlayerLobby(container, s) {
     container.innerHTML = `
       <div class="card live-hero">
-        <div class="big" style="font-size:3rem">🎉</div>
+        <div class="big-avatar">${esc(Player.avatar || '🎉')}</div>
         <h1>Você está dentro, ${esc(Player.name)}!</h1>
         <p class="subtitle">${esc(s.quizName)}</p>
         <p class="muted">Veja seu nome no telão e aguarde o instrutor iniciar o jogo.</p>

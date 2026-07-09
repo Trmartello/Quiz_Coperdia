@@ -3,6 +3,9 @@
 (() => {
   const app = document.getElementById('app');
 
+  // Mesma lista do servidor — avatares permitidos
+  const AVATARS = ['😀','😎','🤩','😜','🤓','😺','🐶','🐼','🦊','🦁','🐸','🐵','🦄','🐙','🐝','🦉','🚀','⚽','🎮','🎸','🔥','⭐','🍕','🤖','👻','🤠','💪','🧠','🎯','🏆'];
+
   function esc(s) {
     const d = document.createElement('div');
     d.textContent = s == null ? '' : String(s);
@@ -24,6 +27,12 @@
           <input type="text" id="join-name" class="join-input" maxlength="40"
                  placeholder="Seu nome" autocomplete="name">
         </div>
+        <div class="field" style="text-align:left">
+          <label>Escolha seu avatar</label>
+          <div class="avatar-picker" id="avatar-picker">
+            ${AVATARS.map(a => `<button type="button" class="avatar-opt" data-avatar="${a}">${a}</button>`).join('')}
+          </div>
+        </div>
         <p class="muted" id="join-error" style="color:var(--danger);display:none"></p>
         <button class="btn btn-primary btn-lg" id="btn-join">Entrar</button>
         <p class="muted" style="margin-top:22px">
@@ -35,6 +44,17 @@
     const pinInput = app.querySelector('#join-pin');
     const nameInput = app.querySelector('#join-name');
     const errEl = app.querySelector('#join-error');
+
+    // Avatar: começa com um aleatório já selecionado
+    let avatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
+    const paintAvatars = () => {
+      app.querySelectorAll('.avatar-opt').forEach(b =>
+        b.classList.toggle('selected', b.dataset.avatar === avatar));
+    };
+    paintAvatars();
+    app.querySelectorAll('.avatar-opt').forEach(b => {
+      b.addEventListener('click', () => { avatar = b.dataset.avatar; paintAvatars(); });
+    });
 
     pinInput.addEventListener('input', () => {
       pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 6);
@@ -60,7 +80,7 @@
       btn.disabled = true;
       btn.textContent = 'Entrando...';
       try {
-        await Live.join(pin, name);
+        await Live.join(pin, name, avatar);
         location.hash = `#/play/${pin}`;
       } catch (err) {
         errEl.textContent = err.message;

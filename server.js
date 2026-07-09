@@ -19,6 +19,9 @@ const REVEAL_DELAY_MS = 800;            // margem após o fim do tempo
 const QUESTION_TYPES = ['quiz', 'tf', 'poll', 'wordcloud'];
 const POINTS_MULTIPLIER = { standard: 1, double: 2, none: 0 };
 
+// Mesma lista do cliente (js/app.js) — avatares permitidos
+const AVATARS = ['😀','😎','🤩','😜','🤓','😺','🐶','🐼','🦊','🦁','🐸','🐵','🦄','🐙','🐝','🦉','🚀','⚽','🎮','🎸','🔥','⭐','🍕','🤖','👻','🤠','💪','🧠','🎯','🏆'];
+
 const rooms = new Map(); // pin -> room
 
 /* ==================== Utilidades ==================== */
@@ -179,7 +182,7 @@ function computePoints(correct, elapsedMs, limitMs, multiplier) {
 
 function leaderboard(room) {
   return [...room.players.entries()]
-    .map(([id, p]) => ({ id, name: p.name, score: p.score, correct: p.correctCount }))
+    .map(([id, p]) => ({ id, name: p.name, avatar: p.avatar, score: p.score, correct: p.correctCount }))
     .sort((a, b) => b.score - a.score)
     .map((p, i) => ({ ...p, rank: i + 1 }));
 }
@@ -245,7 +248,7 @@ function snapshotFor(room, conn) {
   const q = currentQuestion(room);
 
   if (room.state === 'lobby') {
-    base.players = [...room.players.values()].map(p => p.name);
+    base.players = [...room.players.values()].map(p => ({ name: p.name, avatar: p.avatar }));
   }
 
   if (room.state === 'question' && q) {
@@ -422,13 +425,16 @@ async function handleApi(req, res, urlPath, query) {
     const taken = [...room.players.values()].some(p => p.name.toLowerCase() === name.toLowerCase());
     if (taken) return json(res, 409, { error: 'Já existe um participante com esse nome. Use outro.' });
     if (room.players.size >= 200) return json(res, 409, { error: 'A sala está cheia.' });
+    const avatar = AVATARS.includes(body.avatar)
+      ? body.avatar
+      : AVATARS[Math.floor(Math.random() * AVATARS.length)];
     const playerId = uid();
     room.players.set(playerId, {
-      name, score: 0, streak: 0, correctCount: 0, answers: new Map(),
+      name, avatar, score: 0, streak: 0, correctCount: 0, answers: new Map(),
     });
     touch(room);
     broadcast(room);
-    return json(res, 201, { playerId, name });
+    return json(res, 201, { playerId, name, avatar });
   }
 
   // POST /api/rooms/:pin/answer — participante responde a questão atual
