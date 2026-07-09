@@ -7,9 +7,9 @@ const Live = (() => {
   const REACTIONS = ['👍','👏','❤️','😂','🤔','😮'];
   const TYPE_LABELS = {
     quiz: '🎯 Quiz', tf: '⚖️ Verdadeiro ou falso', short: '⌨️ Resposta curta',
-    slider: '🎚️ Controle deslizante', poll: '📊 Enquete', scale: '📏 Escala',
+    slider: '🎚️ Controle deslizante', puzzle: '🧩 Puzzle', poll: '📊 Enquete', scale: '📏 Escala',
     nps: '💯 Escala NPS', pin: '📍 Largar marcador', wordcloud: '☁️ Nuvem de palavras',
-    brainstorm: '💡 Brainstorm', slide: '🖼️ Slide',
+    brainstorm: '💡 Brainstorm', open: '💬 Pergunta aberta', slide: '🖼️ Slide',
   };
 
   let es = null;            // EventSource ativo
@@ -450,14 +450,18 @@ const Live = (() => {
           ${(s.ideas || []).map(idea => `
             <div class="idea-row">💡 ${esc(idea.text)}${idea.count > 1 ? ` <small>×${idea.count}</small>` : ''}</div>`).join('')}
         </div>`;
-    } else if (q.type === 'wordcloud' || q.type === 'short' || q.type === 'brainstorm') {
-      const icons = { short: '⌨️', wordcloud: '☁️', brainstorm: '💡' };
+    } else if (q.type === 'wordcloud' || q.type === 'short' || q.type === 'brainstorm' || q.type === 'open') {
+      const icons = { short: '⌨️', wordcloud: '☁️', brainstorm: '💡', open: '💬' };
       body = `
         <div class="empty-state" style="padding:26px 0">
           <div class="big">${icons[q.type]}</div>
           <p class="muted">Os participantes estão digitando ${q.type === 'brainstorm' ? 'as ideias' : 'as respostas'} nos celulares...</p>
-          ${(q.maxAnswers || 1) > 1 ? `<p class="muted">Cada participante pode enviar até ${q.maxAnswers} ${q.type === 'brainstorm' ? 'ideias' : 'respostas'}.</p>` : ''}
+          ${(q.maxAnswers || 1) > 1 && q.type !== 'open' ? `<p class="muted">Cada participante pode enviar até ${q.maxAnswers} ${q.type === 'brainstorm' ? 'ideias' : 'respostas'}.</p>` : ''}
         </div>`;
+    } else if (q.type === 'puzzle') {
+      body = `
+        <p class="muted" style="text-align:center;margin-bottom:8px">🧩 Coloquem as alternativas na ordem correta nos celulares.</p>
+        ${optionsHtml(q)}`;
     } else if (q.type === 'scale' || q.type === 'nps') {
       body = scaleHtml(q);
     } else if (q.type === 'slider') {
@@ -580,6 +584,27 @@ const Live = (() => {
               <span class="idea-votes">⭐ ${idea.votes}</span>
             </div>`).join('')}
         </div>`;
+    } else if (q.type === 'puzzle') {
+      body = `
+        <p class="muted" style="text-align:center;margin-bottom:8px">✔ Ordem correta — <strong>${s.orderRight || 0} de ${s.playersCount}</strong> acertaram:</p>
+        <div class="puzzle-answer">
+          ${(s.correctOrder || []).map((o, i) => `
+            <div class="puzzle-item green">
+              <span class="puzzle-pos">${i + 1}º</span>
+              <span class="puzzle-text">${esc(o)}</span>
+            </div>`).join('')}
+        </div>`;
+    } else if (q.type === 'open') {
+      body = (s.responses || []).length === 0
+        ? '<p class="muted" style="text-align:center;padding:24px 0">Nenhuma resposta recebida.</p>'
+        : `
+        <div class="open-grid">
+          ${s.responses.map(r => `
+            <div class="open-card">
+              <p>${esc(r.text)}</p>
+              <small>${esc(r.avatar || '🙂')} ${esc(r.name)}</small>
+            </div>`).join('')}
+        </div>`;
     } else if (q.type === 'scale') {
       const total = (s.counts || []).reduce((a, b) => a + b, 0) || 1;
       body = `
@@ -680,7 +705,7 @@ const Live = (() => {
     if (countdown) clearInterval(countdown);
     const q = s.question;
     const body = hostRevealBody(s);
-    const scored = q.type === 'quiz' || q.type === 'tf' || q.type === 'short' || q.type === 'slider';
+    const scored = ['quiz', 'tf', 'short', 'slider', 'puzzle'].includes(q.type);
     const deltaBadge = d => d > 0
       ? `<span class="rank-delta up">▲ ${d}</span>`
       : d < 0 ? `<span class="rank-delta down">▼ ${-d}</span>` : '<span class="rank-delta">—</span>';
@@ -1152,6 +1177,71 @@ const Live = (() => {
       return;
     }
 
+    // Pergunta aberta: texto livre mais longo, vira cartão no telão
+    if (q.type === 'open') {
+      container.innerHTML = `
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          <div class="field">
+            <textarea class="open-answer" rows="4" maxlength="250" placeholder="Escreva sua resposta (até 250 caracteres)"></textarea>
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-send">Enviar resposta</button>
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      const input = container.querySelector('.open-answer');
+      container.querySelector('#btn-send').addEventListener('click', () => {
+        const text = input.value.trim();
+        if (!text) { input.focus(); return; }
+        sendAnswer(container, s, text);
+      });
+      input.focus();
+      return;
+    }
+
+    // Puzzle: reordena as alternativas embaralhadas com ▲/▼ e envia
+    if (q.type === 'puzzle') {
+      const n = q.options.length;
+      const order = q.options.map((_, i) => i); // sequência atual (posições exibidas)
+      container.innerHTML = `
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          <p class="muted" style="margin-bottom:10px">🧩 Use as setas para colocar na ordem correta e envie.</p>
+          <div id="puzzle-list"></div>
+          <button class="btn btn-primary btn-lg" id="btn-send" style="margin-top:12px">Enviar ordem</button>
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      const listEl = container.querySelector('#puzzle-list');
+      const renderList = () => {
+        listEl.innerHTML = order.map((dispIdx, pos) => `
+          <div class="puzzle-item ${COLORS[dispIdx]}">
+            <span class="puzzle-pos">${pos + 1}º</span>
+            <span class="shape">${SHAPES[dispIdx]}</span>
+            <span class="puzzle-text">${esc(q.options[dispIdx])}</span>
+            <span class="puzzle-moves">
+              <button type="button" class="puzzle-up" data-pos="${pos}" ${pos === 0 ? 'disabled' : ''}>▲</button>
+              <button type="button" class="puzzle-down" data-pos="${pos}" ${pos === n - 1 ? 'disabled' : ''}>▼</button>
+            </span>
+          </div>`).join('');
+        const swap = (a, b) => { [order[a], order[b]] = [order[b], order[a]]; renderList(); };
+        listEl.querySelectorAll('.puzzle-up').forEach(b =>
+          b.addEventListener('click', () => swap(Number(b.dataset.pos) - 1, Number(b.dataset.pos))));
+        listEl.querySelectorAll('.puzzle-down').forEach(b =>
+          b.addEventListener('click', () => swap(Number(b.dataset.pos), Number(b.dataset.pos) + 1)));
+      };
+      renderList();
+      container.querySelector('#btn-send').addEventListener('click', e => {
+        e.target.disabled = true;
+        sendAnswer(container, s, order.slice());
+      });
+      return;
+    }
+
     // Brainstorm em votação: escolhe as melhores ideias (até maxVotes)
     if (q.type === 'brainstorm' && s.brainPhase === 'vote') {
       const maxV = q.maxVotes || 3;
@@ -1272,7 +1362,7 @@ const Live = (() => {
     if (countdown) clearInterval(countdown);
     const me = s.me || {};
     const qType = s.question.type;
-    const scored = qType === 'quiz' || qType === 'tf' || qType === 'short' || qType === 'slider';
+    const scored = ['quiz', 'tf', 'short', 'slider', 'puzzle'].includes(qType);
 
     if (!scored) {
       const isSlide = qType === 'slide';

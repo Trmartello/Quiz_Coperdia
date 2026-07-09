@@ -1154,3 +1154,65 @@ body.screen-host .nps-score strong { font-size: 2.8rem; }
 body.screen-host .nps-legend { font-size: 1.1rem; }
 body.screen-host .pin-map img { max-height: 56vh; }
 body.screen-host .pin-map .pin-marker { font-size: 2.4rem; }
+
+/* ===== Puzzle (ordenar alternativas) ===== */
+.puzzle-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  color: #fff;
+  font-weight: 600;
+}
+.puzzle-item.red { background: #e21b3c; }
+.puzzle-item.blue { background: #1368ce; }
+.puzzle-item.yellow { background: #d89e00; }
+.puzzle-item.green { background: #26890c; }
+.puzzle-item.purple { background: #7b2ff2; }
+.puzzle-item.orange { background: #e06000; }
+.puzzle-pos {
+  flex: 0 0 34px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  text-align: center;
+  padding: 3px 0;
+}
+.puzzle-text { flex: 1; }
+.puzzle-moves { display: flex; gap: 6px; }
+.puzzle-moves button {
+  border: none;
+  border-radius: 8px;
+  width: 40px;
+  height: 36px;
+  font-size: 1rem;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+.puzzle-moves button:disabled { opacity: 0.35; cursor: default; }
+.puzzle-answer { max-width: 760px; margin: 0 auto; }
+
+/* ===== Pergunta aberta (cartões de resposta no telão) ===== */
+.open-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+.open-card {
+  background: var(--primary-light);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.open-card p { font-weight: 600; line-height: 1.4; margin-bottom: 8px; white-space: pre-wrap; }
+.open-card small { color: var(--text-muted); font-weight: 700; }
+.tp-stack { flex-direction: column; }
+.tp-stack .tp-opt { width: 100%; }
+
+/* Modo telão */
+body.screen-host .puzzle-item { font-size: 1.25rem; padding: 14px 18px; }
+body.screen-host .open-card p { font-size: 1.15rem; }

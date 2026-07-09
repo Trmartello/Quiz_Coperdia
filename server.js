@@ -16,8 +16,8 @@ const ROOM_TTL_MS = 3 * 60 * 60 * 1000; // salas expiram após 3h
 const DEFAULT_TIME = 20;                // segundos por questão quando não definido
 const REVEAL_DELAY_MS = 800;            // margem após o fim do tempo
 
-const QUESTION_TYPES = ['quiz', 'tf', 'short', 'slider', 'poll', 'scale', 'nps', 'pin', 'wordcloud', 'brainstorm', 'slide'];
-const SCORED_TYPES = ['quiz', 'tf', 'short', 'slider']; // tipos que valem nota/pontos
+const QUESTION_TYPES = ['quiz', 'tf', 'short', 'slider', 'puzzle', 'poll', 'scale', 'nps', 'pin', 'wordcloud', 'brainstorm', 'open', 'slide'];
+const SCORED_TYPES = ['quiz', 'tf', 'short', 'slider', 'puzzle']; // tipos que valem nota/pontos
 const SLIDE_LAYOUTS = ['classic', 'big-title', 'title-text', 'bullets', 'quote', 'big-media'];
 const POINTS_MULTIPLIER = { standard: 1, double: 2, none: 0 };
 
@@ -105,7 +105,7 @@ function sanitizeQuiz(quiz) {
     const t = Number(raw.timeLimit);
     if (t >= 5 && t <= 600) q.timeLimit = Math.round(t);
 
-    if (type === 'quiz' || type === 'poll') {
+    if (type === 'quiz' || type === 'poll' || type === 'puzzle') {
       if (!Array.isArray(raw.options)) continue;
       // Mantém texto+imagem pareados e remapeia os índices corretos se alguma opção vazia for removida
       const rawImages = Array.isArray(raw.optionImages) ? raw.optionImages : [];
@@ -127,6 +127,16 @@ function sanitizeQuiz(quiz) {
           .filter(i => indexMap.has(i))
           .map(i => indexMap.get(i));
       }
+    }
+    if (type === 'puzzle') {
+      // As opções chegam na ORDEM CORRETA; sorteia uma ordem de exibição (a mesma para todos)
+      const idx = q.options.map((_, i) => i);
+      for (let i = idx.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [idx[i], idx[j]] = [idx[j], idx[i]];
+      }
+      if (idx.length > 1 && idx.every((v, k) => v === k)) [idx[0], idx[1]] = [idx[1], idx[0]];
+      q.shuffleMap = idx; // posição exibida -> posição na ordem correta
     }
     if (type === 'tf') {
       q.options = ['Verdadeiro', 'Falso'];
@@ -260,7 +270,7 @@ function currentQuestion(room) {
 
 function answerCounts(room) {
   const q = currentQuestion(room);
-  if (!q || q.type === 'wordcloud' || q.type === 'short' || q.type === 'slide') return [];
+  if (!q || ['wordcloud', 'short', 'slide', 'puzzle', 'open'].includes(q.type)) return [];
   const counts = q.options.map(() => 0);
   for (const p of room.players.values()) {
     const a = p.answers.get(room.questionIndex);
@@ -314,9 +324,12 @@ function brainRanked(room) {
 /* ==================== Snapshots por papel ==================== */
 
 function questionPublic(q) {
+  // Puzzle: todos veem as opções na ordem embaralhada — a correta só aparece na revelação
+  const shuffled = q.type === 'puzzle';
   return {
     type: q.type, text: q.text, image: q.image,
-    options: q.options, optionImages: q.optionImages,
+    options: shuffled ? q.shuffleMap.map(i => q.options[i]) : q.options,
+    optionImages: shuffled ? q.shuffleMap.map(i => q.optionImages[i]) : q.optionImages,
     multi: q.multi, maxAnswers: q.maxAnswers || 1, maxVotes: q.maxVotes || 3,
     scaleLeft: q.scaleLeft, scaleRight: q.scaleRight,
     body: q.body, layout: q.layout || 'classic',
@@ -391,6 +404,17 @@ function snapshotFor(room, conn) {
     }
     if (q.type === 'brainstorm' && room.brain) {
       base.ideas = brainRanked(room);
+    }
+    if (q.type === 'puzzle') {
+      base.correctOrder = q.options; // a ordem correta, revelada só agora
+      base.orderRight = [...room.players.values()]
+        .filter(p => { const a = p.answers.get(room.questionIndex); return a && a.correct; }).length;
+    }
+    if (q.type === 'open') {
+      base.responses = [...room.players.values()]
+        .map(p => ({ name: p.name, avatar: p.avatar, answer: p.answers.get(room.questionIndex) }))
+        .filter(r => r.answer && typeof r.answer.value === 'string')
+        .map(r => ({ name: r.name, avatar: r.avatar, text: r.answer.value }));
     }
     base.showRanking = room.quiz.showRanking;
     if (room.quiz.showRanking) {
@@ -529,6 +553,19 @@ function registerAnswer(room, player, body) {
     if (!text) return { error: 'Digite uma resposta.', status: 400 };
     value = text;
     correct = q.answers.some(a => a.toLowerCase() === text.toLowerCase());
+  } else if (q.type === 'open') {
+    const text = String(body.answer || '').trim().replace(/\s+/g, ' ').slice(0, 250);
+    if (!text) return { error: 'Digite uma resposta.', status: 400 };
+    value = text;
+  } else if (q.type === 'puzzle') {
+    // valor = sequência de posições exibidas, na ordem escolhida pelo participante
+    const arr = Array.isArray(body.answer) ? body.answer.map(Number) : null;
+    const n = q.options.length;
+    const valid = arr && arr.length === n &&
+      new Set(arr).size === n && arr.every(i => Number.isInteger(i) && i >= 0 && i < n);
+    if (!valid) return { error: 'Ordene todas as alternativas.', status: 400 };
+    value = arr;
+    correct = arr.every((dispIdx, k) => q.shuffleMap[dispIdx] === k);
   } else if (q.type === 'slider') {
     const v = Number(body.answer);
     if (!Number.isFinite(v) || v < q.sliderMin || v > q.sliderMax) {

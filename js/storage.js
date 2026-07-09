@@ -20,12 +20,14 @@ const Store = (() => {
     tf: { label: 'Verdadeiro ou falso', icon: '⚖️', cat: 'know', desc: 'Deixe os participantes decidirem se a afirmação é verdadeira ou falsa.' },
     short: { label: 'Resposta curta', icon: '⌨️', cat: 'know', desc: 'Os participantes digitam a resposta. Acerta quem escrever uma das respostas aceitas.' },
     slider: { label: 'Controle deslizante', icon: '🎚️', cat: 'know', desc: 'Os participantes arrastam um controle para acertar o valor correto em uma faixa numérica.' },
+    puzzle: { label: 'Puzzle', icon: '🧩', cat: 'know', desc: 'Os participantes colocam as alternativas na ordem correta. Elas aparecem embaralhadas.' },
     poll: { label: 'Enquete', icon: '📊', cat: 'opinion', desc: 'Coleta opiniões com alternativas — sem resposta certa e sem pontos.' },
     scale: { label: 'Escala', icon: '📏', cat: 'opinion', desc: 'Os participantes avaliam de 1 a 5 (ex.: discordo → concordo). Sem pontos.' },
     nps: { label: 'Escala NPS', icon: '💯', cat: 'opinion', desc: 'Meça satisfação e lealdade de 0 a 10 e veja o NPS (promotores − detratores) no telão.' },
     pin: { label: 'Largar marcador', icon: '📍', cat: 'opinion', desc: 'Os participantes tocam em um ponto da imagem — os marcadores aparecem no telão.' },
     wordcloud: { label: 'Nuvem de palavras', icon: '☁️', cat: 'opinion', desc: 'Respostas livres curtas formam uma nuvem de palavras no telão.' },
     brainstorm: { label: 'Brainstorm', icon: '💡', cat: 'opinion', desc: 'Colete ideias dos participantes e depois abra a votação para ranquear as melhores.' },
+    open: { label: 'Pergunta aberta', icon: '💬', cat: 'opinion', desc: 'Respostas livres mais longas aparecem como cartões com o nome de quem respondeu.' },
     slide: { label: 'Slide', icon: '🖼️', cat: 'slides', desc: 'Tela de conteúdo (título, texto e imagem) para explicar algo entre as questões.' },
   };
 
@@ -118,7 +120,7 @@ const Store = (() => {
       if (!Array.isArray(n.corrects) || n.corrects.length !== 1) n.corrects = [0];
       n.multi = false;
     }
-    const opinion = ['poll', 'wordcloud', 'scale', 'nps', 'pin', 'brainstorm', 'slide'];
+    const opinion = ['poll', 'wordcloud', 'scale', 'nps', 'pin', 'brainstorm', 'open', 'slide'];
     if (opinion.includes(n.type)) {
       n.corrects = [];
       n.multi = false;
@@ -130,7 +132,13 @@ const Store = (() => {
       n.multi = false;
       n.answers = (Array.isArray(n.answers) ? n.answers : []).map(a => String(a));
     }
-    if (['scale', 'nps', 'pin', 'brainstorm', 'slide'].includes(n.type)) n.options = [];
+    if (n.type === 'puzzle') {
+      // as opções JÁ estão na ordem correta; o servidor embaralha para os participantes
+      n.corrects = [];
+      n.multi = false;
+      if (n.points === 'none') n.points = 'standard';
+    }
+    if (['scale', 'nps', 'pin', 'brainstorm', 'open', 'slide'].includes(n.type)) n.options = [];
     if (n.type === 'wordcloud' || n.type === 'brainstorm') {
       n.options = [];
       n.maxAnswers = Math.min(5, Math.max(1, Math.round(Number(n.maxAnswers)) || (n.type === 'brainstorm' ? 3 : 1)));

@@ -145,6 +145,12 @@ const Admin = (() => {
               ${esc(o)}${q.corrects.includes(oi) ? ' ✔' : ''}
             </li>`).join('')}
         </ol>`;
+    } else if (q.type === 'puzzle') {
+      detail = `
+        <p class="muted" style="margin-top:6px">Ordem correta (embaralhada para os participantes):</p>
+        <ol>${q.options.map(o => `<li class="correct">${esc(o)}</li>`).join('')}</ol>`;
+    } else if (q.type === 'open') {
+      detail = '<p class="muted" style="margin-top:6px">Pergunta aberta — respostas livres viram cartões no telão.</p>';
     } else if (q.type === 'short') {
       detail = `<p class="muted" style="margin-top:6px">Respostas aceitas:
         ${q.answers.map(a => `<span class="pill pill-pass">✔ ${esc(a)}</span>`).join(' ')}</p>`;
@@ -381,6 +387,10 @@ const Admin = (() => {
       <div class="tp-mini"><div class="tp-media tp-pinmap">🖼️<span class="tp-pin p1">📍</span><span class="tp-pin p2">📍</span><span class="tp-pin p3">📍</span></div></div>`;
     if (key === 'brainstorm') return `
       <div class="tp-mini"><div class="tp-opts"><span class="tp-opt blue">💡⭐</span><span class="tp-opt green">💡⭐</span><span class="tp-opt yellow">💡</span><span class="tp-opt red">💡</span></div></div>`;
+    if (key === 'puzzle') return `
+      <div class="tp-mini"><div class="tp-opts tp-stack"><span class="tp-opt red">2º</span><span class="tp-opt blue">1º</span><span class="tp-opt yellow">4º</span><span class="tp-opt green">3º</span></div></div>`;
+    if (key === 'open') return `
+      <div class="tp-mini"><div class="tp-input" style="height:auto">💬 “Achei o treinamento ótimo porque…”</div></div>`;
     return `
       <div class="tp-mini"><div class="tp-slide"><strong>Título</strong><span></span><span style="width:70%"></span></div></div>`;
   }
@@ -439,7 +449,12 @@ const Admin = (() => {
       if (!(Number(q.sliderStep) > 0)) q.sliderStep = 1;
       if (!Number.isFinite(Number(q.sliderAnswer))) q.sliderAnswer = q.sliderMin;
       if (!(Number(q.sliderTolerance) >= 0)) q.sliderTolerance = 0;
-    } else if (['wordcloud', 'scale', 'nps', 'pin', 'brainstorm', 'slide'].includes(type)) {
+    } else if (type === 'puzzle') {
+      if (q.options.length < 2) { q.options = ['', '', '', '']; q.optionImages = [null, null, null, null]; }
+      q.corrects = [];
+      q.multi = false;
+      if (q.points === 'none') q.points = 'standard';
+    } else if (['wordcloud', 'scale', 'nps', 'pin', 'brainstorm', 'open', 'slide'].includes(type)) {
       q.options = [];
       q.optionImages = [];
       q.corrects = [];
@@ -475,8 +490,8 @@ const Admin = (() => {
 
     const draw = () => {
       const type = q.type;
-      const hasOptions = type === 'quiz' || type === 'poll';
-      const scored = type === 'quiz' || type === 'tf' || type === 'short';
+      const hasOptions = type === 'quiz' || type === 'poll' || type === 'puzzle';
+      const scored = ['quiz', 'tf', 'short', 'slider', 'puzzle'].includes(type);
 
       modal.innerHTML = `
         <button class="modal-close" aria-label="Fechar">✕</button>
@@ -574,6 +589,18 @@ const Admin = (() => {
                 <strong>votação</strong> e todos votam nas melhores. O telão mostra o ranking das ideias.
               </div>` : ''}
 
+            ${type === 'puzzle' ? `
+              <div class="notice notice-info">
+                🧩 Digite as alternativas <strong>na ordem correta</strong> (1º, 2º, 3º...). Elas aparecem
+                embaralhadas para os participantes, que precisam reordenar. Acerta quem reproduzir a ordem exata.
+              </div>` : ''}
+
+            ${type === 'open' ? `
+              <div class="notice notice-info">
+                💬 Os participantes escrevem uma resposta livre (até 250 caracteres). As respostas aparecem
+                como cartões no telão, com o nome de quem respondeu. Sem resposta certa e sem pontos.
+              </div>` : ''}
+
             ${type === 'slide' ? `
               <div class="notice notice-info">
                 🖼️ Slide de conteúdo: use o enunciado como <strong>título</strong> e o texto abaixo para explicar.
@@ -596,7 +623,7 @@ const Admin = (() => {
               </div>` : ''}
 
             ${hasOptions ? `
-              <label>Alternativas${type === 'quiz' ? ' — marque a(s) correta(s)' : ''}</label>
+              <label>Alternativas${type === 'quiz' ? ' — marque a(s) correta(s)' : type === 'puzzle' ? ' — na ordem correta (1º ao último)' : ''}</label>
               <div id="q-options" style="margin-top:8px">
                 ${q.options.map((o, i) => `
                   <div class="option-edit-row">
@@ -854,7 +881,7 @@ const Admin = (() => {
         const err = modal.querySelector('#q-error');
         const fail = msg => { err.textContent = msg; err.style.display = 'block'; };
         if (!q.text.trim()) return fail('Informe o enunciado da questão.');
-        if (q.type === 'quiz' || q.type === 'poll') {
+        if (q.type === 'quiz' || q.type === 'poll' || q.type === 'puzzle') {
           const filled = q.options.map((o, i) => ({ text: o.trim(), image: q.optionImages[i], i }))
             .filter(o => o.text || o.image);
           if (filled.length < 2) return fail('Preencha pelo menos 2 alternativas (texto ou imagem).');
