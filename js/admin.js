@@ -151,8 +151,19 @@ const Admin = (() => {
     } else if (q.type === 'scale') {
       detail = `<p class="muted" style="margin-top:6px">Escala de 1
         ${q.scaleLeft ? `(${esc(q.scaleLeft)})` : ''} a 5 ${q.scaleRight ? `(${esc(q.scaleRight)})` : ''} — sem pontos.</p>`;
+    } else if (q.type === 'nps') {
+      detail = `<p class="muted" style="margin-top:6px">Escala NPS de 0 a 10 — o telão mostra promotores, neutros, detratores e o NPS.</p>`;
+    } else if (q.type === 'slider') {
+      detail = `<p class="muted" style="margin-top:6px">Controle deslizante de ${q.sliderMin} a ${q.sliderMax}
+        (passo ${q.sliderStep}) — resposta: <strong>${q.sliderAnswer}</strong>${Number(q.sliderTolerance) > 0 ? ` ±${q.sliderTolerance}` : ''}.</p>`;
+    } else if (q.type === 'pin') {
+      detail = `<p class="muted" style="margin-top:6px">Os participantes largam um marcador na imagem — sem pontos.</p>`;
+    } else if (q.type === 'brainstorm') {
+      detail = `<p class="muted" style="margin-top:6px">Brainstorm: até ${q.maxAnswers || 3} ideias por participante,
+        depois votação (${q.maxVotes || 3} votos cada).</p>`;
     } else if (q.type === 'slide') {
-      detail = `<p class="muted" style="margin-top:6px">${esc((q.body || '').slice(0, 120)) || 'Slide de conteúdo — sem respostas.'}</p>`;
+      detail = `<p class="muted" style="margin-top:6px">${esc((q.body || '').slice(0, 120)) || 'Slide de conteúdo — sem respostas.'}
+        <span class="type-badge">layout: ${Store.SLIDE_LAYOUTS[q.layout] || 'Clássico'}</span></p>`;
     } else {
       const n = q.maxAnswers || 1;
       detail = `<p class="muted" style="margin-top:6px">Resposta livre — forma uma nuvem de palavras no telão
@@ -168,6 +179,7 @@ const Admin = (() => {
             ${q.timeLimit ? `<span class="type-badge">⏱ ${q.timeLimit}s</span>` : ''}
             ${q.points === 'double' ? '<span class="type-badge">x2 pontos</span>' : ''}
             ${q.points === 'none' ? '<span class="type-badge">sem pontos</span>' : ''}
+            ${q.reactions === false ? '<span class="type-badge">🚫 sem reações</span>' : ''}
             <strong style="display:block;margin-top:6px">${i + 1}. ${esc(q.text) || '<em>sem enunciado</em>'}</strong>
           </div>
           <div class="admin-actions">
@@ -360,6 +372,15 @@ const Admin = (() => {
       <div class="tp-mini"><div class="tp-scale">${[1, 2, 3, 4, 5].map(n => `<span>${n}</span>`).join('')}</div></div>`;
     if (key === 'wordcloud') return `
       <div class="tp-mini"><div class="tp-cloud"><b>equipe</b> <span>foco</span> <b style="font-size:1.1em">união</b> <span>meta</span></div></div>`;
+    if (key === 'slider') return `
+      <div class="tp-mini"><div class="tp-slider"><span class="tp-track"><i></i></span><small>0&nbsp;··· valor certo ···&nbsp;100</small></div></div>`;
+    if (key === 'nps') return `
+      <div class="tp-mini"><div class="tp-scale tp-nps">${[0, 2, 4, 6, 8, 10].map(n => `<span>${n}</span>`).join('')}</div>
+        <div class="tp-ends"><span>Improvável</span><span>Muito provável</span></div></div>`;
+    if (key === 'pin') return `
+      <div class="tp-mini"><div class="tp-media tp-pinmap">🖼️<span class="tp-pin p1">📍</span><span class="tp-pin p2">📍</span><span class="tp-pin p3">📍</span></div></div>`;
+    if (key === 'brainstorm') return `
+      <div class="tp-mini"><div class="tp-opts"><span class="tp-opt blue">💡⭐</span><span class="tp-opt green">💡⭐</span><span class="tp-opt yellow">💡</span><span class="tp-opt red">💡</span></div></div>`;
     return `
       <div class="tp-mini"><div class="tp-slide"><strong>Título</strong><span></span><span style="width:70%"></span></div></div>`;
   }
@@ -408,13 +429,28 @@ const Admin = (() => {
       q.multi = false;
       if (!Array.isArray(q.answers)) q.answers = [];
       if (q.points === 'none') q.points = 'standard';
-    } else if (type === 'wordcloud' || type === 'scale' || type === 'slide') {
+    } else if (type === 'slider') {
+      q.options = [];
+      q.optionImages = [];
+      q.corrects = [];
+      q.multi = false;
+      if (q.points === 'none') q.points = 'standard';
+      if (!(Number(q.sliderMax) > Number(q.sliderMin))) { q.sliderMin = 0; q.sliderMax = 100; }
+      if (!(Number(q.sliderStep) > 0)) q.sliderStep = 1;
+      if (!Number.isFinite(Number(q.sliderAnswer))) q.sliderAnswer = q.sliderMin;
+      if (!(Number(q.sliderTolerance) >= 0)) q.sliderTolerance = 0;
+    } else if (['wordcloud', 'scale', 'nps', 'pin', 'brainstorm', 'slide'].includes(type)) {
       q.options = [];
       q.optionImages = [];
       q.corrects = [];
       q.multi = false;
       q.points = 'none';
       if (type === 'wordcloud') q.maxAnswers = q.maxAnswers || 1;
+      if (type === 'brainstorm') {
+        q.maxAnswers = Math.min(5, Math.max(1, q.maxAnswers || 3));
+        q.maxVotes = Math.min(5, Math.max(1, q.maxVotes || 3));
+      }
+      if (type === 'slide' && !q.layout) q.layout = 'classic';
     } else if (type === 'poll') {
       if (q.options.length < 2) { q.options = ['', '']; q.optionImages = [null, null]; }
       q.corrects = [];
@@ -479,19 +515,63 @@ const Admin = (() => {
               <p class="muted" style="font-size:0.78rem;margin-top:6px">A comparação ignora maiúsculas/minúsculas e espaços extras.</p>
             ` : ''}
 
-            ${type === 'scale' ? `
+            ${type === 'scale' || type === 'nps' ? `
               <div class="notice notice-info">
-                📏 Os participantes escolhem uma nota de <strong>1 a 5</strong>. Dê significado às pontas abaixo (opcional).
+                ${type === 'nps'
+                  ? '💯 Os participantes escolhem uma nota de <strong>0 a 10</strong>. O telão mostra o NPS: % de promotores (9–10) menos % de detratores (0–6).'
+                  : '📏 Os participantes escolhem uma nota de <strong>1 a 5</strong>. Dê significado às pontas abaixo (opcional).'}
               </div>
               <div class="field-row">
                 <div class="field">
-                  <label for="q-scale-left">Rótulo do 1</label>
-                  <input type="text" id="q-scale-left" maxlength="40" value="${esc(q.scaleLeft || '')}" placeholder="Ex.: Discordo totalmente">
+                  <label for="q-scale-left">Rótulo do ${type === 'nps' ? '0' : '1'}</label>
+                  <input type="text" id="q-scale-left" maxlength="40" value="${esc(q.scaleLeft || '')}" placeholder="${type === 'nps' ? 'Improvável' : 'Ex.: Discordo totalmente'}">
                 </div>
                 <div class="field">
-                  <label for="q-scale-right">Rótulo do 5</label>
-                  <input type="text" id="q-scale-right" maxlength="40" value="${esc(q.scaleRight || '')}" placeholder="Ex.: Concordo totalmente">
+                  <label for="q-scale-right">Rótulo do ${type === 'nps' ? '10' : '5'}</label>
+                  <input type="text" id="q-scale-right" maxlength="40" value="${esc(q.scaleRight || '')}" placeholder="${type === 'nps' ? 'Muito provável' : 'Ex.: Concordo totalmente'}">
                 </div>
+              </div>` : ''}
+
+            ${type === 'slider' ? `
+              <div class="notice notice-info">
+                🎚️ Os participantes arrastam um controle e tentam acertar o valor. Acerta quem ficar dentro da margem de erro.
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="q-sl-min">Valor mínimo</label>
+                  <input type="number" id="q-sl-min" value="${Number(q.sliderMin) || 0}">
+                </div>
+                <div class="field">
+                  <label for="q-sl-max">Valor máximo</label>
+                  <input type="number" id="q-sl-max" value="${Number(q.sliderMax) || 100}">
+                </div>
+                <div class="field">
+                  <label for="q-sl-step">Intervalo (passo)</label>
+                  <input type="number" id="q-sl-step" min="0" value="${Number(q.sliderStep) || 1}">
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label for="q-sl-answer">✔ Resposta correta</label>
+                  <input type="number" id="q-sl-answer" value="${Number(q.sliderAnswer) || 0}">
+                </div>
+                <div class="field">
+                  <label for="q-sl-tol">± Margem de erro aceita</label>
+                  <input type="number" id="q-sl-tol" min="0" value="${Number(q.sliderTolerance) || 0}">
+                </div>
+              </div>` : ''}
+
+            ${type === 'pin' ? `
+              <div class="notice ${q.image ? 'notice-info' : 'notice-warn'}">
+                📍 ${q.image
+                  ? 'Os participantes tocarão em um ponto desta imagem — todos os marcadores aparecem juntos no telão.'
+                  : '<strong>Adicione uma imagem acima</strong> — é nela que os participantes largarão os marcadores.'}
+              </div>` : ''}
+
+            ${type === 'brainstorm' ? `
+              <div class="notice notice-info">
+                💡 Em duas etapas: primeiro cada participante envia ideias; depois o instrutor abre a
+                <strong>votação</strong> e todos votam nas melhores. O telão mostra o ranking das ideias.
               </div>` : ''}
 
             ${type === 'slide' ? `
@@ -577,6 +657,44 @@ const Admin = (() => {
                   Quantas palavras ou frases cada participante pode enviar para a nuvem.
                 </p>
               </div>` : ''}
+            ${type === 'brainstorm' ? `
+              <div class="field">
+                <label for="q-max">💡 Ideias por participante</label>
+                <select id="q-max">
+                  ${[1, 2, 3, 4, 5].map(n =>
+                    `<option value="${n}" ${n === (q.maxAnswers || 3) ? 'selected' : ''}>${n === 1 ? '1 ideia' : n + ' ideias'}</option>`).join('')}
+                </select>
+              </div>
+              <div class="field">
+                <label for="q-maxvotes">⭐ Votos por participante</label>
+                <select id="q-maxvotes">
+                  ${[1, 2, 3, 4, 5].map(n =>
+                    `<option value="${n}" ${n === (q.maxVotes || 3) ? 'selected' : ''}>${n === 1 ? '1 voto' : n + ' votos'}</option>`).join('')}
+                </select>
+              </div>` : ''}
+            ${type === 'slide' ? `
+              <div class="field">
+                <label for="q-layout">🎛 Layout do slide</label>
+                <select id="q-layout">
+                  ${Object.entries(Store.SLIDE_LAYOUTS).map(([k, v]) =>
+                    `<option value="${k}" ${k === (q.layout || 'classic') ? 'selected' : ''}>${v}</option>`).join('')}
+                </select>
+                <p class="muted" style="margin-top:4px;font-size:0.78rem">
+                  Como o título, o texto e a imagem são organizados no telão.
+                </p>
+              </div>` : ''}
+            <div class="field">
+              <label for="q-reactions">😊 Reações</label>
+              <select id="q-reactions">
+                <option value="yes" ${q.reactions !== false ? 'selected' : ''}>Sim</option>
+                <option value="no" ${q.reactions === false ? 'selected' : ''}>Não</option>
+              </select>
+              <p class="muted" style="margin-top:4px;font-size:0.78rem">
+                ${q.reactions !== false
+                  ? 'Os participantes podem reagir com emojis durante esta questão: 👍 👏 ❤️ 😂 🤔 😮'
+                  : 'As reações com emojis ficam desativadas nesta questão.'}
+              </p>
+            </div>
             ${type === 'quiz' ? `
               <div class="field">
                 <label for="q-mode">☑️ Opções de resposta</label>
@@ -622,6 +740,20 @@ const Admin = (() => {
         if (srEl) q.scaleRight = srEl.value.trim();
         const bodyEl = modal.querySelector('#q-body');
         if (bodyEl) q.body = bodyEl.value.trim();
+        const layoutEl = modal.querySelector('#q-layout');
+        if (layoutEl) q.layout = layoutEl.value;
+        const reactEl = modal.querySelector('#q-reactions');
+        if (reactEl) q.reactions = reactEl.value !== 'no';
+        const votesEl = modal.querySelector('#q-maxvotes');
+        if (votesEl) q.maxVotes = Number(votesEl.value) || 3;
+        const num = id => { const el = modal.querySelector(id); return el ? Number(el.value) : null; };
+        if (modal.querySelector('#q-sl-min')) {
+          q.sliderMin = num('#q-sl-min') || 0;
+          q.sliderMax = num('#q-sl-max');
+          q.sliderStep = num('#q-sl-step');
+          q.sliderAnswer = num('#q-sl-answer');
+          q.sliderTolerance = num('#q-sl-tol') || 0;
+        }
       };
 
       /* --- troca de tipo --- */
@@ -738,6 +870,18 @@ const Admin = (() => {
         }
         if (q.type === 'short' && q.answers.length === 0) {
           return fail('Informe ao menos uma resposta aceita.');
+        }
+        if (q.type === 'pin' && !q.image) {
+          return fail('Adicione uma imagem — os participantes tocarão nela para largar o marcador.');
+        }
+        if (q.type === 'slider') {
+          if (!(Number(q.sliderMax) > Number(q.sliderMin))) return fail('O valor máximo deve ser maior que o mínimo.');
+          if (!(Number(q.sliderStep) > 0)) q.sliderStep = 1;
+          const a = Number(q.sliderAnswer);
+          if (!Number.isFinite(a) || a < q.sliderMin || a > q.sliderMax) {
+            return fail('A resposta correta deve estar dentro da faixa do controle.');
+          }
+          if (!(Number(q.sliderTolerance) >= 0)) q.sliderTolerance = 0;
         }
         q.text = q.text.trim();
         const saved = Store.getTraining(training.id);

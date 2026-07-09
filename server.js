@@ -16,8 +16,9 @@ const ROOM_TTL_MS = 3 * 60 * 60 * 1000; // salas expiram após 3h
 const DEFAULT_TIME = 20;                // segundos por questão quando não definido
 const REVEAL_DELAY_MS = 800;            // margem após o fim do tempo
 
-const QUESTION_TYPES = ['quiz', 'tf', 'short', 'poll', 'scale', 'wordcloud', 'slide'];
-const SCORED_TYPES = ['quiz', 'tf', 'short']; // tipos que valem nota/pontos
+const QUESTION_TYPES = ['quiz', 'tf', 'short', 'slider', 'poll', 'scale', 'nps', 'pin', 'wordcloud', 'brainstorm', 'slide'];
+const SCORED_TYPES = ['quiz', 'tf', 'short', 'slider']; // tipos que valem nota/pontos
+const SLIDE_LAYOUTS = ['classic', 'big-title', 'title-text', 'bullets', 'quote', 'big-media'];
 const POINTS_MULTIPLIER = { standard: 1, double: 2, none: 0 };
 
 // Mesma lista do cliente (js/app.js) — avatares permitidos
@@ -90,10 +91,14 @@ function sanitizeQuiz(quiz) {
       answers: [],   // resposta curta: textos aceitos
       multi: false,
       timeLimit: null,
-      maxAnswers: 1, // nuvem de palavras: quantas respostas cada participante pode enviar
-      scaleLeft: '', // escala: rótulos das pontas
+      maxAnswers: 1, // nuvem/brainstorm: quantas respostas cada participante pode enviar
+      maxVotes: 3,   // brainstorm: votos por participante
+      scaleLeft: '', // escala/NPS: rótulos das pontas
       scaleRight: '',
       body: '',      // slide: texto de apoio
+      layout: 'classic', // slide: layout visual
+      reactions: raw.reactions !== false, // reações emoji habilitadas nesta questão
+      sliderMin: 0, sliderMax: 100, sliderStep: 1, sliderAnswer: 50, sliderTolerance: 0,
       pointsMultiplier: POINTS_MULTIPLIER[raw.points] !== undefined
         ? POINTS_MULTIPLIER[raw.points] : 1,
     };
@@ -133,6 +138,28 @@ function sanitizeQuiz(quiz) {
       q.scaleLeft = String(raw.scaleLeft || '').slice(0, 40);
       q.scaleRight = String(raw.scaleRight || '').slice(0, 40);
     }
+    if (type === 'nps') {
+      q.options = Array.from({ length: 11 }, (_, i) => String(i)); // 0 a 10
+      q.optionImages = q.options.map(() => null);
+      q.scaleLeft = String(raw.scaleLeft || 'Improvável').slice(0, 40);
+      q.scaleRight = String(raw.scaleRight || 'Muito provável').slice(0, 40);
+    }
+    if (type === 'slider') {
+      let min = Number(raw.sliderMin), max = Number(raw.sliderMax);
+      if (!Number.isFinite(min)) min = 0;
+      if (!Number.isFinite(max) || max <= min) { min = 0; max = 100; }
+      let step = Number(raw.sliderStep);
+      if (!(step > 0) || step > max - min) step = 1;
+      let answer = Number(raw.sliderAnswer);
+      if (!Number.isFinite(answer)) answer = min;
+      answer = Math.min(max, Math.max(min, answer));
+      let tol = Number(raw.sliderTolerance);
+      if (!(tol >= 0)) tol = 0;
+      Object.assign(q, { sliderMin: min, sliderMax: max, sliderStep: step, sliderAnswer: answer, sliderTolerance: tol });
+    }
+    if (type === 'pin') {
+      if (!q.image) continue; // largar marcador exige uma imagem
+    }
     if (type === 'short') {
       // respostas aceitas: até 10 textos, sem repetição (comparação sem maiúsculas)
       const seen = new Set();
@@ -147,6 +174,7 @@ function sanitizeQuiz(quiz) {
     }
     if (type === 'slide') {
       q.body = String(raw.body || '').slice(0, 1000);
+      q.layout = SLIDE_LAYOUTS.includes(raw.layout) ? raw.layout : 'classic';
     }
     if (type === 'quiz' || type === 'tf') {
       const corrects = Array.isArray(raw.corrects) ? raw.corrects : [];
@@ -157,10 +185,14 @@ function sanitizeQuiz(quiz) {
       q.multi = type === 'quiz' && raw.multi === true;
       if (!q.multi && q.corrects.length > 1) q.corrects = [q.corrects[0]];
     } else if (!SCORED_TYPES.includes(type)) {
-      q.pointsMultiplier = 0; // enquete, escala, nuvem e slide não pontuam
-      if (type === 'wordcloud') {
+      q.pointsMultiplier = 0; // tipos de opinião e slides não pontuam
+      if (type === 'wordcloud' || type === 'brainstorm') {
         const m = Math.round(Number(raw.maxAnswers));
-        q.maxAnswers = m >= 1 && m <= 5 ? m : 1;
+        q.maxAnswers = m >= 1 && m <= 5 ? m : (type === 'brainstorm' ? 3 : 1);
+      }
+      if (type === 'brainstorm') {
+        const v = Math.round(Number(raw.maxVotes));
+        q.maxVotes = v >= 1 && v <= 5 ? v : 3;
       }
     }
     questions.push(q);
@@ -187,6 +219,7 @@ function createRoom(quiz) {
     questionIndex: -1,
     questionStartedAt: 0,
     questionTimer: null,
+    brain: null, // brainstorm: { phase: 'ideas'|'vote', ideas: [{text,count}], votes: Map(playerId -> [índices]) }
     players: new Map(), // playerId -> { name, score, streak, correctCount, answers: Map(qIdx -> {value, ms, correct, points}) }
     prevRanks: new Map(),  // playerId -> posição antes da questão atual (para o "subiu/desceu")
     rankDeltas: new Map(), // playerId -> variação de posição na última revelação
@@ -258,11 +291,24 @@ function wordCloud(room) {
 }
 
 function answeredCount(room) {
+  // Na fase de votação do brainstorm, conta quem já votou
+  if (room.brain && room.brain.phase === 'vote') return room.brain.votes.size;
   let n = 0;
   for (const p of room.players.values()) {
     if (p.answers.has(room.questionIndex)) n++;
   }
   return n;
+}
+
+// Ideias do brainstorm ranqueadas pelos votos recebidos
+function brainRanked(room) {
+  const votes = room.brain.ideas.map(() => 0);
+  for (const list of room.brain.votes.values()) {
+    for (const i of list) if (votes[i] !== undefined) votes[i]++;
+  }
+  return room.brain.ideas
+    .map((idea, i) => ({ text: idea.text, count: idea.count, votes: votes[i] }))
+    .sort((a, b) => b.votes - a.votes || b.count - a.count);
 }
 
 /* ==================== Snapshots por papel ==================== */
@@ -271,11 +317,13 @@ function questionPublic(q) {
   return {
     type: q.type, text: q.text, image: q.image,
     options: q.options, optionImages: q.optionImages,
-    multi: q.multi, maxAnswers: q.maxAnswers || 1,
+    multi: q.multi, maxAnswers: q.maxAnswers || 1, maxVotes: q.maxVotes || 3,
     scaleLeft: q.scaleLeft, scaleRight: q.scaleRight,
-    body: q.body,
+    body: q.body, layout: q.layout || 'classic',
+    reactions: q.reactions !== false,
+    sliderMin: q.sliderMin, sliderMax: q.sliderMax, sliderStep: q.sliderStep,
     isScored: q.pointsMultiplier > 0,
-    // As respostas aceitas (short) NÃO vão aqui — só na revelação
+    // As respostas aceitas (short) e o valor correto (slider) NÃO vão aqui — só na revelação
   };
 }
 
@@ -299,9 +347,17 @@ function snapshotFor(room, conn) {
     base.remainingMs = Math.max(0, limitMs - (Date.now() - room.questionStartedAt));
     base.limitMs = limitMs;
     base.answeredCount = answeredCount(room);
+    if (room.brain) {
+      base.brainPhase = room.brain.phase;
+      if (room.brain.phase === 'vote') {
+        base.ideas = room.brain.ideas.map(i => ({ text: i.text, count: i.count }));
+      }
+    }
     if (conn.role === 'player') {
       const p = room.players.get(conn.playerId);
-      base.answered = !!(p && p.answers.has(room.questionIndex));
+      base.answered = room.brain && room.brain.phase === 'vote'
+        ? room.brain.votes.has(conn.playerId)
+        : !!(p && p.answers.has(room.questionIndex));
     }
   }
 
@@ -317,6 +373,24 @@ function snapshotFor(room, conn) {
     }
     if (q.type === 'short') {
       base.acceptedAnswers = q.answers; // reveladas só depois que o tempo fecha
+    }
+    if (q.type === 'slider') {
+      // valor correto e respostas de todos — revelados só depois que o tempo fecha
+      base.sliderAnswer = q.sliderAnswer;
+      base.sliderTolerance = q.sliderTolerance;
+      base.sliderValues = [...room.players.values()]
+        .map(p => p.answers.get(room.questionIndex))
+        .filter(a => a && typeof a.value === 'number')
+        .map(a => a.value);
+    }
+    if (q.type === 'pin') {
+      base.pins = [...room.players.values()]
+        .map(p => p.answers.get(room.questionIndex))
+        .filter(a => a && a.value && typeof a.value.x === 'number')
+        .map(a => a.value);
+    }
+    if (q.type === 'brainstorm' && room.brain) {
+      base.ideas = brainRanked(room);
     }
     base.showRanking = room.quiz.showRanking;
     if (room.quiz.showRanking) {
@@ -376,6 +450,39 @@ function startQuestion(room, index) {
   room.state = 'question';
   room.questionIndex = index;
   room.questionStartedAt = Date.now();
+  const q = room.quiz.questions[index];
+  room.brain = q && q.type === 'brainstorm'
+    ? { phase: 'ideas', ideas: [], votes: new Map() } : null;
+  room.questionTimer = setTimeout(() => questionTimeUp(room), questionLimitMs(room) + REVEAL_DELAY_MS);
+  touch(room);
+  broadcast(room);
+}
+
+// Fim do tempo: brainstorm passa para a votação; os demais tipos revelam
+function questionTimeUp(room) {
+  if (room.brain && room.brain.phase === 'ideas') startBrainVote(room);
+  else reveal(room);
+}
+
+// Brainstorm: agrega as ideias enviadas e abre a fase de votação (com novo tempo)
+function startBrainVote(room) {
+  if (room.state !== 'question' || !room.brain || room.brain.phase !== 'ideas') return;
+  clearTimeout(room.questionTimer);
+  const dedup = new Map(); // minúsculas -> { text, count }
+  for (const p of room.players.values()) {
+    const a = p.answers.get(room.questionIndex);
+    if (!a || !Array.isArray(a.value)) continue;
+    for (const text of a.value) {
+      const key = String(text).toLowerCase();
+      const entry = dedup.get(key) || { text: String(text), count: 0 };
+      entry.count++;
+      dedup.set(key, entry);
+    }
+  }
+  const ideas = [...dedup.values()].sort((a, b) => b.count - a.count).slice(0, 40);
+  if (ideas.length === 0) return reveal(room); // ninguém enviou ideias
+  room.brain = { phase: 'vote', ideas, votes: new Map() };
+  room.questionStartedAt = Date.now(); // novo tempo para votar
   room.questionTimer = setTimeout(() => reveal(room), questionLimitMs(room) + REVEAL_DELAY_MS);
   touch(room);
   broadcast(room);
@@ -422,14 +529,29 @@ function registerAnswer(room, player, body) {
     if (!text) return { error: 'Digite uma resposta.', status: 400 };
     value = text;
     correct = q.answers.some(a => a.toLowerCase() === text.toLowerCase());
-  } else if (q.type === 'wordcloud') {
+  } else if (q.type === 'slider') {
+    const v = Number(body.answer);
+    if (!Number.isFinite(v) || v < q.sliderMin || v > q.sliderMax) {
+      return { error: 'Valor fora da faixa.', status: 400 };
+    }
+    value = v;
+    correct = Math.abs(v - q.sliderAnswer) <= q.sliderTolerance;
+  } else if (q.type === 'pin') {
+    const x = Number(body.answer && body.answer.x);
+    const y = Number(body.answer && body.answer.y);
+    if (!(x >= 0 && x <= 1 && y >= 0 && y <= 1)) {
+      return { error: 'Toque em um ponto da imagem.', status: 400 };
+    }
+    value = { x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000 };
+  } else if (q.type === 'wordcloud' || q.type === 'brainstorm') {
     // Aceita uma string (clientes antigos) ou uma lista de até maxAnswers textos
     const raw = Array.isArray(body.answer) ? body.answer : [body.answer];
+    const maxLen = q.type === 'brainstorm' ? 80 : 30;
     const seen = new Set();
     const texts = [];
     for (const item of raw) {
       if (typeof item !== 'string' && typeof item !== 'number') continue;
-      const text = String(item).trim().replace(/\s+/g, ' ').slice(0, 30);
+      const text = String(item).trim().replace(/\s+/g, ' ').slice(0, maxLen);
       if (!text) continue;
       const key = text.toLowerCase();
       if (seen.has(key)) continue; // ignora repetições do mesmo participante
@@ -523,14 +645,34 @@ async function handleApi(req, res, urlPath, query) {
     return json(res, 200, { ok: true });
   }
 
-  // POST /api/rooms/:pin/answer — participante responde a questão atual
+  // POST /api/rooms/:pin/answer — participante responde a questão atual (ou vota no brainstorm)
   if (req.method === 'POST' && action === '/answer') {
     const body = await readBody(req);
-    const player = room.players.get(String(body.playerId || ''));
+    const playerId = String(body.playerId || '');
+    const player = room.players.get(playerId);
     if (!player) return json(res, 403, { error: 'Participante não encontrado.' });
     if (room.state !== 'question' || body.questionIndex !== room.questionIndex) {
       return json(res, 409, { error: 'Fora do tempo de resposta.' });
     }
+
+    // Brainstorm em votação: registra os votos (segunda rodada de resposta da mesma questão)
+    if (room.brain && room.brain.phase === 'vote') {
+      if (room.brain.votes.has(playerId)) {
+        return json(res, 409, { error: 'Você já votou.' });
+      }
+      const q = currentQuestion(room);
+      const raw = Array.isArray(body.answer) ? body.answer : [body.answer];
+      const ids = [...new Set(raw)]
+        .filter(i => Number.isInteger(i) && i >= 0 && i < room.brain.ideas.length)
+        .slice(0, q.maxVotes || 3);
+      if (ids.length === 0) return json(res, 400, { error: 'Escolha ao menos uma ideia.' });
+      room.brain.votes.set(playerId, ids);
+      touch(room);
+      if (room.brain.votes.size >= room.players.size) reveal(room);
+      else broadcast(room);
+      return json(res, 200, { ok: true });
+    }
+
     if (player.answers.has(room.questionIndex)) {
       return json(res, 409, { error: 'Você já respondeu esta questão.' });
     }
@@ -538,9 +680,10 @@ async function handleApi(req, res, urlPath, query) {
     if (result.error) return json(res, result.status, { error: result.error });
     touch(room);
 
-    // Todos responderam? Revela na hora.
+    // Todos responderam? Brainstorm abre a votação; os demais revelam na hora.
     if (answeredCount(room) >= room.players.size) {
-      reveal(room);
+      if (room.brain && room.brain.phase === 'ideas') startBrainVote(room);
+      else reveal(room);
     } else {
       broadcast(room); // atualiza contador de respostas no telão
     }
@@ -558,6 +701,12 @@ async function handleApi(req, res, urlPath, query) {
       startQuestion(room, 0);
     } else if (cmd === 'reveal') {
       reveal(room);
+    } else if (cmd === 'brainvote') {
+      // Brainstorm: instrutor encerra o envio de ideias e abre a votação
+      if (!room.brain || room.brain.phase !== 'ideas' || room.state !== 'question') {
+        return json(res, 409, { error: 'Ação indisponível agora.' });
+      }
+      startBrainVote(room);
     } else if (cmd === 'next') {
       // Slides avançam direto da exibição (sem passar pelo reveal)
       const q = currentQuestion(room);

@@ -7,7 +7,9 @@ const Live = (() => {
   const REACTIONS = ['👍','👏','❤️','😂','🤔','😮'];
   const TYPE_LABELS = {
     quiz: '🎯 Quiz', tf: '⚖️ Verdadeiro ou falso', short: '⌨️ Resposta curta',
-    poll: '📊 Enquete', scale: '📏 Escala', wordcloud: '☁️ Nuvem de palavras', slide: '🖼️ Slide',
+    slider: '🎚️ Controle deslizante', poll: '📊 Enquete', scale: '📏 Escala',
+    nps: '💯 Escala NPS', pin: '📍 Largar marcador', wordcloud: '☁️ Nuvem de palavras',
+    brainstorm: '💡 Brainstorm', slide: '🖼️ Slide',
   };
 
   let es = null;            // EventSource ativo
@@ -86,7 +88,9 @@ const Live = (() => {
   }
 
   let lastReactAt = 0;
-  function reactionBarHtml() {
+  // Some quando as reações estiverem desativadas na questão atual (propriedade "Reações: Não")
+  function reactionBarHtml(s) {
+    if (s && s.question && s.question.reactions === false) return '';
     return `
       <div class="reaction-bar">
         ${REACTIONS.map(r => `<button type="button" class="reaction-btn" data-react="${r}">${r}</button>`).join('')}
@@ -208,6 +212,35 @@ const Live = (() => {
     `;
   }
 
+  // Slide no telão conforme o layout escolhido no editor (estilo Kahoot)
+  function slideHtml(q) {
+    const layout = q.layout || 'classic';
+    const title = `<p class="question-text q-big slide-title">${esc(q.text)}</p>`;
+    const media = mediaHtml(q);
+    const body = q.body ? `<p class="slide-body">${esc(q.body)}</p>` : '';
+    if (layout === 'big-title') {
+      return `<div class="slide-layout lay-big-title"><p class="slide-title-huge">${esc(q.text)}</p>${media}${body}</div>`;
+    }
+    if (layout === 'title-text') {
+      return `<div class="slide-layout lay-title-text">${title}<div class="slide-cols"><div>${body}</div>${media}</div></div>`;
+    }
+    if (layout === 'bullets') {
+      const items = (q.body || '').split('\n').map(l => l.trim().replace(/^[-•*]\s*/, '')).filter(Boolean);
+      return `<div class="slide-layout lay-bullets">${title}<div class="slide-cols">
+        <ul class="slide-bullets">${items.map(li => `<li>${esc(li)}</li>`).join('')}</ul>${media}</div></div>`;
+    }
+    if (layout === 'quote') {
+      return `<div class="slide-layout lay-quote">${media}
+        <blockquote class="slide-quote">“${esc(q.text)}”</blockquote>
+        ${q.body ? `<p class="slide-quote-author">— ${esc(q.body)}</p>` : ''}</div>`;
+    }
+    if (layout === 'big-media') {
+      return `<div class="slide-layout lay-big-media">${title}
+        ${q.image ? `<div class="q-media media-big"><img src="${q.image}" alt=""></div>` : ''}${body}</div>`;
+    }
+    return `<div class="slide-layout lay-classic">${title}${media}${body}</div>`;
+  }
+
   function cloudHtml(words) {
     if (!words || words.length === 0) {
       return '<p class="muted" style="text-align:center;padding:24px 0">Nenhuma resposta recebida.</p>';
@@ -225,7 +258,7 @@ const Live = (() => {
 
   /* ==================== INSTRUTOR (host) ==================== */
 
-  const Host = { pin: null, token: null, saved: false };
+  const Host = { pin: null, token: null, saved: false, history: {}, review: null };
 
   async function renderHost(container, trainingId) {
     stop();
@@ -258,6 +291,8 @@ const Live = (() => {
       Host.pin = pin;
       Host.token = hostToken;
       Host.saved = false;
+      Host.history = {};
+      Host.review = null;
       listen(pin, `hostToken=${encodeURIComponent(hostToken)}`, s => drawHost(container, s), () => {
         const note = container.querySelector('#conn-note');
         if (note) note.textContent = 'Reconectando...';
@@ -281,12 +316,20 @@ const Live = (() => {
   }
 
   function drawHost(container, s) {
+    // Guarda cada questão exibida para a revisão posterior (somente visualização)
+    if (s.questionIndex >= 0 && s.question &&
+        (s.state === 'reveal' || (s.state === 'question' && s.question.type === 'slide'))) {
+      Host.history[s.questionIndex] = s;
+    }
+    if (Host.review !== null) return; // em revisão: o jogo continua em lastSnap, sem redesenhar
+
     if (s.state === 'question') {
       // A mesma questão só é desenhada uma vez — os snapshots seguintes atualizam apenas o contador
-      if (!viewOnce(`hq:${s.questionIndex}`)) {
+      // (a fase do brainstorm entra na chave: ideias → votação redesenha)
+      if (!viewOnce(`hq:${s.questionIndex}:${s.brainPhase || ''}`)) {
         const el = container.querySelector('#host-answered');
         if (el && s.question && s.question.type !== 'slide') {
-          el.textContent = `✋ ${s.answeredCount}/${s.playersCount} responderam`;
+          el.textContent = `✋ ${s.answeredCount}/${s.playersCount} ${s.brainPhase === 'vote' ? 'votaram' : 'responderam'}`;
         }
         return;
       }
@@ -396,41 +439,69 @@ const Live = (() => {
   function drawHostQuestion(container, s) {
     const q = s.question;
     const isSlide = q.type === 'slide';
+    const brainVoting = q.type === 'brainstorm' && s.brainPhase === 'vote';
     let body;
     if (isSlide) {
-      body = `${q.body ? `<p class="slide-body">${esc(q.body)}</p>` : ''}`;
-    } else if (q.type === 'wordcloud' || q.type === 'short') {
+      body = q.body ? `<p class="slide-body">${esc(q.body)}</p>` : '';
+    } else if (brainVoting) {
+      body = `
+        <p class="muted" style="text-align:center;margin:6px 0 12px">⭐ Votação aberta — cada participante escolhe até ${q.maxVotes || 3} ideias no celular.</p>
+        <div class="idea-list">
+          ${(s.ideas || []).map(idea => `
+            <div class="idea-row">💡 ${esc(idea.text)}${idea.count > 1 ? ` <small>×${idea.count}</small>` : ''}</div>`).join('')}
+        </div>`;
+    } else if (q.type === 'wordcloud' || q.type === 'short' || q.type === 'brainstorm') {
+      const icons = { short: '⌨️', wordcloud: '☁️', brainstorm: '💡' };
       body = `
         <div class="empty-state" style="padding:26px 0">
-          <div class="big">${q.type === 'short' ? '⌨️' : '☁️'}</div>
-          <p class="muted">Os participantes estão digitando as respostas nos celulares...</p>
-          ${q.type === 'wordcloud' && (q.maxAnswers || 1) > 1 ? `<p class="muted">Cada participante pode enviar até ${q.maxAnswers} respostas.</p>` : ''}
+          <div class="big">${icons[q.type]}</div>
+          <p class="muted">Os participantes estão digitando ${q.type === 'brainstorm' ? 'as ideias' : 'as respostas'} nos celulares...</p>
+          ${(q.maxAnswers || 1) > 1 ? `<p class="muted">Cada participante pode enviar até ${q.maxAnswers} ${q.type === 'brainstorm' ? 'ideias' : 'respostas'}.</p>` : ''}
         </div>`;
-    } else if (q.type === 'scale') {
+    } else if (q.type === 'scale' || q.type === 'nps') {
       body = scaleHtml(q);
+    } else if (q.type === 'slider') {
+      body = `
+        <div class="empty-state" style="padding:26px 0">
+          <div class="big">🎚️</div>
+          <p class="muted">Os participantes estão escolhendo um valor entre <strong>${q.sliderMin}</strong> e <strong>${q.sliderMax}</strong>...</p>
+        </div>`;
+    } else if (q.type === 'pin') {
+      body = '<p class="muted" style="text-align:center;margin-top:8px">📍 Os participantes estão tocando em um ponto da imagem nos celulares...</p>';
     } else {
       body = optionsHtml(q);
     }
+    const btnLabel = isSlide
+      ? (s.questionIndex + 1 >= s.totalQuestions ? '🏁 Ver pódio' : 'Avançar →')
+      : q.type === 'brainstorm'
+        ? (brainVoting ? 'Encerrar votação' : '⭐ Iniciar votação')
+        : 'Encerrar tempo';
+    const btnCmd = isSlide ? 'next' : (q.type === 'brainstorm' && !brainVoting) ? 'brainvote' : 'reveal';
     container.innerHTML = `
       <div class="card">
         ${timerHeader(s, ` — PIN ${Host.pin}`)}
-        <p class="question-text q-big">${esc(q.text)}</p>
-        ${mediaHtml(q)}
-        ${body}
+        ${isSlide ? slideHtml(q) : `
+          <p class="question-text q-big">${esc(q.text)}</p>
+          ${mediaHtml(q)}
+          ${body}`}
         ${q.multi ? '<p class="muted" style="text-align:center;margin-top:10px">Múltipla escolha: selecione todas as corretas e envie</p>' : ''}
         <div class="quiz-header" style="margin-top:16px">
-          <span class="quiz-progress-text" id="host-answered">${isSlide ? '' : `✋ ${s.answeredCount}/${s.playersCount} responderam`}</span>
-          <button class="btn ${isSlide ? 'btn-primary' : 'btn-secondary'}" id="btn-reveal">${isSlide ? (s.questionIndex + 1 >= s.totalQuestions ? '🏁 Ver pódio' : 'Avançar →') : 'Encerrar tempo'}</button>
+          <span class="quiz-progress-text" id="host-answered">${isSlide ? '' : `✋ ${s.answeredCount}/${s.playersCount} ${brainVoting ? 'votaram' : 'responderam'}`}</span>
+          <span style="display:flex;gap:8px;align-items:center">
+            ${reviewButtonHtml(s.questionIndex)}
+            <button class="btn ${isSlide || brainVoting ? 'btn-primary' : 'btn-secondary'}" id="btn-reveal">${btnLabel}</button>
+          </span>
         </div>
       </div>
     `;
     startCountdown(container, s.remainingMs, s.limitMs);
-    container.querySelector('#btn-reveal').addEventListener('click', () => hostCommand(container, isSlide ? 'next' : 'reveal'));
-    showQuestionIntro(s);
+    container.querySelector('#btn-reveal').addEventListener('click', () => hostCommand(container, btnCmd));
+    wireReviewButton(container, s.questionIndex);
+    if (!brainVoting) showQuestionIntro(s); // a vinheta só na primeira fase da questão
   }
 
-  function drawHostReveal(container, s) {
-    if (countdown) clearInterval(countdown);
+  // Corpo da questão no telão após o tempo (usado na revelação e na revisão)
+  function hostRevealBody(s) {
     const q = s.question;
     let body;
     if (q.type === 'wordcloud') {
@@ -445,6 +516,70 @@ const Live = (() => {
       `;
     } else if (q.type === 'slide') {
       body = q.body ? `<p class="slide-body">${esc(q.body)}</p>` : '';
+    } else if (q.type === 'nps') {
+      // NPS = % promotores (9–10) − % detratores (0–6)
+      const counts = s.counts || [];
+      const total = counts.reduce((a, b) => a + b, 0) || 1;
+      const promoters = (counts[9] || 0) + (counts[10] || 0);
+      const detractors = counts.slice(0, 7).reduce((a, b) => a + b, 0);
+      const nps = Math.round((promoters / total) * 100) - Math.round((detractors / total) * 100);
+      const groupOf = i => (i <= 6 ? 'red' : i <= 8 ? 'yellow' : 'green');
+      body = `
+        <div class="nps-score">NPS <strong>${nps > 0 ? '+' : ''}${nps}</strong></div>
+        <div class="nps-legend">
+          <span class="dist-shape red">■ Detratores (0–6): ${detractors}</span>
+          <span class="dist-shape yellow">■ Neutros (7–8): ${(counts[7] || 0) + (counts[8] || 0)}</span>
+          <span class="dist-shape green">■ Promotores (9–10): ${promoters}</span>
+        </div>
+        <div class="dist-bars nps-bars">
+          ${q.options.map((o, i) => `
+            <div class="dist-col">
+              <span class="dist-count">${counts[i] || 0}</span>
+              <div class="dist-bar ${groupOf(i)}" style="height:${Math.max(6, ((counts[i] || 0) / total) * 150)}px"></div>
+              <span class="dist-shape ${groupOf(i)}">${esc(o)}</span>
+            </div>`).join('')}
+        </div>
+        ${(q.scaleLeft || q.scaleRight) ? `<div class="scale-labels"><span>${esc(q.scaleLeft || '')}</span><span>${esc(q.scaleRight || '')}</span></div>` : ''}
+      `;
+    } else if (q.type === 'slider') {
+      const values = s.sliderValues || [];
+      const range = (q.sliderMax - q.sliderMin) || 1;
+      const pct = v => ((v - q.sliderMin) / range) * 100;
+      const avg = values.length ? (values.reduce((a, b) => a + b, 0) / values.length) : null;
+      body = `
+        <div class="slider-result">
+          <p class="slider-correct">✔ Resposta correta: <strong>${q.sliderAnswer}</strong>
+            ${s.sliderTolerance > 0 ? `<span class="muted">(aceito ±${s.sliderTolerance})</span>` : ''}
+            ${avg !== null ? `<span class="muted"> • média das respostas: ${Math.round(avg * 100) / 100}</span>` : ''}</p>
+          <div class="slider-track">
+            ${values.map(v => `<span class="sl-mark" style="left:${pct(v)}%" title="${v}"></span>`).join('')}
+            <span class="sl-answer" style="left:${pct(q.sliderAnswer)}%">▼</span>
+          </div>
+          <div class="scale-labels"><span>${q.sliderMin}</span><span>${q.sliderMax}</span></div>
+        </div>
+      `;
+    } else if (q.type === 'pin') {
+      const pins = s.pins || [];
+      body = `
+        <div class="pin-map pin-result">
+          <img src="${q.image}" alt="">
+          ${pins.map(p => `<span class="pin-marker" style="left:${p.x * 100}%;top:${p.y * 100}%">📍</span>`).join('')}
+        </div>
+        <p class="muted" style="text-align:center;margin-top:8px">${pins.length} marcador${pins.length === 1 ? '' : 'es'} na imagem.</p>
+      `;
+    } else if (q.type === 'brainstorm') {
+      const medals = ['🥇', '🥈', '🥉'];
+      body = (s.ideas || []).length === 0
+        ? '<p class="muted" style="text-align:center;padding:24px 0">Nenhuma ideia recebida.</p>'
+        : `
+        <div class="idea-list idea-ranked">
+          ${s.ideas.map((idea, i) => `
+            <div class="idea-row ${i === 0 ? 'idea-top' : ''}">
+              <span class="idea-medal">${medals[i] || (i + 1) + 'º'}</span>
+              <span class="idea-text">${esc(idea.text)}${idea.count > 1 ? ` <small>×${idea.count}</small>` : ''}</span>
+              <span class="idea-votes">⭐ ${idea.votes}</span>
+            </div>`).join('')}
+        </div>`;
     } else if (q.type === 'scale') {
       const total = (s.counts || []).reduce((a, b) => a + b, 0) || 1;
       body = `
@@ -480,7 +615,72 @@ const Live = (() => {
         </div>
       `;
     }
-    const scored = q.type === 'quiz' || q.type === 'tf' || q.type === 'short';
+    return body;
+  }
+
+  /* ---------- Revisão de questões anteriores (somente visualização) ---------- */
+
+  function reviewableBefore(idx) {
+    return Object.keys(Host.history).map(Number).filter(i => idx === null || i < idx);
+  }
+
+  function enterReview(container, idx) {
+    if (!Host.history[idx]) return;
+    Host.review = idx;
+    if (countdown) clearInterval(countdown);
+    drawHostReview(container);
+  }
+
+  function drawHostReview(container) {
+    const s = Host.history[Host.review];
+    const q = s.question;
+    const keys = Object.keys(Host.history).map(Number).sort((a, b) => a - b);
+    const pos = keys.indexOf(Host.review);
+    const prev = pos > 0 ? keys[pos - 1] : null;
+    const next = pos < keys.length - 1 ? keys[pos + 1] : null;
+    container.innerHTML = `
+      <div class="review-bar">
+        <span>👁 Revisão — Questão ${s.questionIndex + 1} de ${s.totalQuestions} <span class="muted">(somente visualização)</span></span>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" id="btn-rev-prev" ${prev === null ? 'disabled' : ''}>‹ Anterior</button>
+          <button class="btn btn-ghost btn-sm" id="btn-rev-next" ${next === null ? 'disabled' : ''}>Próxima ›</button>
+          <button class="btn btn-primary btn-sm" id="btn-rev-live">Voltar ao vivo ✕</button>
+        </div>
+      </div>
+      <div class="card">
+        ${q.type === 'slide' ? slideHtml(q) : `
+          <p class="question-text q-big">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          ${hostRevealBody(s)}`}
+      </div>
+    `;
+    container.querySelector('#btn-rev-prev').addEventListener('click', () => enterReview(container, prev));
+    container.querySelector('#btn-rev-next').addEventListener('click', () => enterReview(container, next));
+    container.querySelector('#btn-rev-live').addEventListener('click', () => {
+      Host.review = null;
+      View.key = null; // força o redesenho da tela ao vivo
+      if (lastSnap) drawHost(container, lastSnap);
+    });
+  }
+
+  // Botão "rever" exibido nas telas ao vivo quando já existem questões anteriores
+  function reviewButtonHtml(idx) {
+    return reviewableBefore(idx).length
+      ? '<button class="btn btn-ghost btn-sm" id="btn-review">👁 Rever questões</button>' : '';
+  }
+
+  function wireReviewButton(container, idx) {
+    const btn = container.querySelector('#btn-review');
+    if (!btn) return;
+    const keys = reviewableBefore(idx);
+    btn.addEventListener('click', () => enterReview(container, keys[keys.length - 1]));
+  }
+
+  function drawHostReveal(container, s) {
+    if (countdown) clearInterval(countdown);
+    const q = s.question;
+    const body = hostRevealBody(s);
+    const scored = q.type === 'quiz' || q.type === 'tf' || q.type === 'short' || q.type === 'slider';
     const deltaBadge = d => d > 0
       ? `<span class="rank-delta up">▲ ${d}</span>`
       : d < 0 ? `<span class="rank-delta down">▼ ${-d}</span>` : '<span class="rank-delta">—</span>';
@@ -489,6 +689,7 @@ const Live = (() => {
         <div class="card">
           <div class="quiz-header">
             <span class="quiz-progress-text">Questão ${s.questionIndex + 1} de ${s.totalQuestions} — ${scored ? 'resultado' : 'respostas'}</span>
+            ${reviewButtonHtml(s.questionIndex)}
           </div>
           <p class="question-text q-big">${esc(q.text)}</p>
           ${mediaHtml(q, 'small')}
@@ -514,6 +715,7 @@ const Live = (() => {
       </div>
     `;
     container.querySelector('#btn-next').addEventListener('click', () => hostCommand(container, 'next'));
+    wireReviewButton(container, s.questionIndex);
   }
 
   function drawHostPodium(container, s) {
@@ -570,7 +772,7 @@ const Live = (() => {
                   <td>${r.rank}º</td>
                   <td>${esc(r.avatar || '')} ${esc(r.name)}</td>
                   <td>${r.score}</td>
-                  <td>${r.correct}/${s.scorableTotal}</td>
+                  <td>${r.percent === null ? '' : `<span class="mini-donut" style="--p:${r.percent}"></span>`}${r.correct}/${s.scorableTotal}</td>
                   <td><strong>${r.percent === null ? '—' : r.percent + '%'}</strong></td>
                   <td>${r.passed === null
                     ? '<span class="pill">Participou</span>'
@@ -587,6 +789,7 @@ const Live = (() => {
         <div class="btn-row">
           <a href="#/admin" class="btn btn-primary">Ir para a administração</a>
           <a href="#/" class="btn btn-ghost">Tela inicial</a>
+          ${reviewButtonHtml(null)}
         </div>
       </div>
     `;
@@ -594,6 +797,7 @@ const Live = (() => {
     container.querySelector('#btn-podium-csv').addEventListener('click', () => exportCsv(s));
     container.querySelector('#btn-podium-pdf').addEventListener('click', () => exportPdf(s));
     container.querySelector('#btn-podium-whats').addEventListener('click', e => shareWhatsapp(s, e.target));
+    wireReviewButton(container, null);
   }
 
   /* ---------- Exportações do pódio ---------- */
@@ -769,7 +973,8 @@ const Live = (() => {
   function drawPlayer(container, s) {
     if (s.state === 'question') {
       // Não redesenha a mesma questão a cada snapshot — preserva o que o participante digitou/selecionou
-      if (!viewOnce(`pq:${s.questionIndex}:${s.answered ? 1 : 0}`)) return;
+      // (a fase do brainstorm entra na chave: ideias → votação redesenha)
+      if (!viewOnce(`pq:${s.questionIndex}:${s.answered ? 1 : 0}:${s.brainPhase || ''}`)) return;
       return drawPlayerQuestion(container, s);
     }
     View.key = `p:${s.state}:${s.questionIndex}`;
@@ -801,27 +1006,27 @@ const Live = (() => {
       });
       // Se éramos o último a responder, o reveal pode já ter chegado — não sobrescreve
       if (lastSnap && (lastSnap.state !== 'question' || lastSnap.questionIndex !== s.questionIndex)) return;
-      View.key = `pq:${s.questionIndex}:1`; // o próximo snapshot (já respondida) não redesenha
-      drawWaiting(container);
+      View.key = `pq:${s.questionIndex}:1:${s.brainPhase || ''}`; // o próximo snapshot (já respondida) não redesenha
+      drawWaiting(container, s);
     } catch { /* fora do tempo — o próximo snapshot resolve a tela */ }
   }
 
-  function drawWaiting(container) {
+  function drawWaiting(container, s) {
     container.innerHTML = `
       <div class="card live-hero">
         <div class="big" style="font-size:3rem">⚡</div>
         <h1>Resposta enviada!</h1>
         <p class="muted">Aguardando os demais participantes...</p>
-        ${reactionBarHtml()}
+        ${reactionBarHtml(s)}
       </div>
     `;
     wireReactionBar(container);
   }
 
   function drawPlayerQuestion(container, s) {
-    if (s.answered) return drawWaiting(container);
+    if (s.answered) return drawWaiting(container, s);
     const q = s.question;
-    showQuestionIntro(s); // vinheta em todos os tipos de questão
+    if (s.brainPhase !== 'vote') showQuestionIntro(s); // vinheta só na primeira fase da questão
 
     // Slide: só acompanha o telão (sem resposta)
     if (q.type === 'slide') {
@@ -831,7 +1036,7 @@ const Live = (() => {
           <div class="big" style="font-size:3rem">👀</div>
           <h1 style="font-size:1.3rem">${esc(q.text)}</h1>
           <p class="muted">Acompanhe o conteúdo no telão.</p>
-          ${reactionBarHtml()}
+          ${reactionBarHtml(s)}
         </div>
       `;
       startCountdown(container, s.remainingMs, s.limitMs);
@@ -865,8 +1070,8 @@ const Live = (() => {
       return;
     }
 
-    // Escala 1–5: um toque no número responde
-    if (q.type === 'scale') {
+    // Escala 1–5 / NPS 0–10: um toque no número responde
+    if (q.type === 'scale' || q.type === 'nps') {
       container.innerHTML = `
         <div class="card">
           ${timerHeader(s)}
@@ -885,21 +1090,117 @@ const Live = (() => {
       return;
     }
 
-    // Nuvem de palavras: campos de texto livre (até q.maxAnswers respostas por participante)
-    if (q.type === 'wordcloud') {
-      const max = Math.max(1, q.maxAnswers || 1);
+    // Controle deslizante: arrasta e envia o valor
+    if (q.type === 'slider') {
+      const range = q.sliderMax - q.sliderMin;
+      const mid = q.sliderMin + Math.round((range / 2) / q.sliderStep) * q.sliderStep;
       container.innerHTML = `
         <div class="card">
           ${timerHeader(s)}
           <p class="question-text">${esc(q.text)}</p>
           ${mediaHtml(q, 'small')}
-          ${max > 1 ? `<p class="muted" style="margin-bottom:10px">☁️ Você pode enviar até ${max} respostas — preencha quantas quiser.</p>` : ''}
+          <div class="slider-wrap">
+            <div class="slider-value" id="slider-value">${mid}</div>
+            <input type="range" id="slider-input" min="${q.sliderMin}" max="${q.sliderMax}" step="${q.sliderStep}" value="${mid}">
+            <div class="scale-labels"><span>${q.sliderMin}</span><span>${q.sliderMax}</span></div>
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-send">Enviar resposta</button>
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      const input = container.querySelector('#slider-input');
+      const valueEl = container.querySelector('#slider-value');
+      input.addEventListener('input', () => { valueEl.textContent = input.value; });
+      container.querySelector('#btn-send').addEventListener('click', e => {
+        e.target.disabled = true;
+        sendAnswer(container, s, Number(input.value));
+      });
+      return;
+    }
+
+    // Largar marcador: toca num ponto da imagem e envia
+    if (q.type === 'pin') {
+      container.innerHTML = `
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          <p class="muted" style="margin-bottom:8px">📍 Toque no ponto da imagem que representa a sua resposta.</p>
+          <div class="pin-map" id="pin-map">
+            <img src="${q.image}" alt="">
+            <span class="pin-marker" id="pin-marker" style="display:none">📍</span>
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-send" style="margin-top:12px" disabled>Enviar marcador</button>
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      const map = container.querySelector('#pin-map');
+      const marker = container.querySelector('#pin-marker');
+      const sendBtn = container.querySelector('#btn-send');
+      let pos = null;
+      map.addEventListener('click', e => {
+        const r = map.querySelector('img').getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width;
+        const y = (e.clientY - r.top) / r.height;
+        if (x < 0 || x > 1 || y < 0 || y > 1) return;
+        pos = { x, y };
+        marker.style.display = 'block';
+        marker.style.left = (x * 100) + '%';
+        marker.style.top = (y * 100) + '%';
+        sendBtn.disabled = false;
+      });
+      sendBtn.addEventListener('click', () => { if (pos) sendAnswer(container, s, pos); });
+      return;
+    }
+
+    // Brainstorm em votação: escolhe as melhores ideias (até maxVotes)
+    if (q.type === 'brainstorm' && s.brainPhase === 'vote') {
+      const maxV = q.maxVotes || 3;
+      container.innerHTML = `
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          <p class="muted" style="margin-bottom:10px">⭐ Vote nas melhores ideias — até ${maxV} voto${maxV > 1 ? 's' : ''}.</p>
+          <div class="idea-list">
+            ${(s.ideas || []).map((idea, i) => `
+              <button type="button" class="idea-row idea-vote" data-index="${i}">
+                <span class="idea-star">☆</span> ${esc(idea.text)}
+              </button>`).join('')}
+          </div>
+          <button class="btn btn-primary btn-lg" id="btn-send" style="margin-top:12px" disabled>Enviar votos</button>
+        </div>
+      `;
+      startCountdown(container, s.remainingMs, s.limitMs);
+      const selected = new Set();
+      const sendBtn = container.querySelector('#btn-send');
+      container.querySelectorAll('.idea-vote').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const i = Number(btn.dataset.index);
+          if (selected.has(i)) { selected.delete(i); btn.classList.remove('is-selected'); btn.querySelector('.idea-star').textContent = '☆'; }
+          else if (selected.size < maxV) { selected.add(i); btn.classList.add('is-selected'); btn.querySelector('.idea-star').textContent = '⭐'; }
+          sendBtn.disabled = selected.size === 0;
+        });
+      });
+      sendBtn.addEventListener('click', () => sendAnswer(container, s, [...selected]));
+      return;
+    }
+
+    // Nuvem de palavras / ideias do brainstorm: campos de texto livre (até q.maxAnswers por participante)
+    if (q.type === 'wordcloud' || q.type === 'brainstorm') {
+      const brain = q.type === 'brainstorm';
+      const max = Math.max(1, q.maxAnswers || 1);
+      const noun = brain ? (max > 1 ? 'ideias' : 'ideia') : (max > 1 ? 'respostas' : 'resposta');
+      container.innerHTML = `
+        <div class="card">
+          ${timerHeader(s)}
+          <p class="question-text">${esc(q.text)}</p>
+          ${mediaHtml(q, 'small')}
+          ${max > 1 ? `<p class="muted" style="margin-bottom:10px">${brain ? '💡' : '☁️'} Você pode enviar até ${max} ${noun} — preencha quantas quiser.${brain ? ' Depois todos votam nas melhores.' : ''}</p>` : ''}
           ${Array.from({ length: max }, (_, i) => `
             <div class="field">
-              <input type="text" class="cloud-answer" maxlength="30" autocomplete="off"
-                     placeholder="${max > 1 ? `Resposta ${i + 1}${i > 0 ? ' (opcional)' : ''}` : 'Digite sua resposta (palavra ou frase curta)'}">
+              <input type="text" class="cloud-answer" maxlength="${brain ? 80 : 30}" autocomplete="off"
+                     placeholder="${max > 1 ? `${brain ? 'Ideia' : 'Resposta'} ${i + 1}${i > 0 ? ' (opcional)' : ''}` : 'Digite sua resposta (palavra ou frase curta)'}">
             </div>`).join('')}
-          <button class="btn btn-primary btn-lg" id="btn-send">Enviar ${max > 1 ? 'respostas' : 'resposta'}</button>
+          <button class="btn btn-primary btn-lg" id="btn-send">Enviar ${noun}</button>
         </div>
       `;
       startCountdown(container, s.remainingMs, s.limitMs);
@@ -971,7 +1272,7 @@ const Live = (() => {
     if (countdown) clearInterval(countdown);
     const me = s.me || {};
     const qType = s.question.type;
-    const scored = qType === 'quiz' || qType === 'tf' || qType === 'short';
+    const scored = qType === 'quiz' || qType === 'tf' || qType === 'short' || qType === 'slider';
 
     if (!scored) {
       const isSlide = qType === 'slide';
@@ -980,7 +1281,7 @@ const Live = (() => {
           <div class="big" style="font-size:3rem">${isSlide ? '👀' : me.answered ? '💬' : '⏰'}</div>
           <h1>${isSlide ? 'Vamos continuar!' : me.answered ? 'Obrigado pela sua opinião!' : 'Tempo esgotado!'}</h1>
           <p class="muted">${isSlide ? 'Aguarde o instrutor avançar.' : 'Veja as respostas de todos no telão.'}</p>
-          ${reactionBarHtml()}
+          ${reactionBarHtml(s)}
         </div>
       `;
       wireReactionBar(container);

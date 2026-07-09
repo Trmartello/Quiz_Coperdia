@@ -19,10 +19,24 @@ const Store = (() => {
     quiz: { label: 'Quiz', icon: '🟥', cat: 'know', desc: 'Alternativas coloridas com resposta correta. Pontua pela velocidade.' },
     tf: { label: 'Verdadeiro ou falso', icon: '⚖️', cat: 'know', desc: 'Deixe os participantes decidirem se a afirmação é verdadeira ou falsa.' },
     short: { label: 'Resposta curta', icon: '⌨️', cat: 'know', desc: 'Os participantes digitam a resposta. Acerta quem escrever uma das respostas aceitas.' },
+    slider: { label: 'Controle deslizante', icon: '🎚️', cat: 'know', desc: 'Os participantes arrastam um controle para acertar o valor correto em uma faixa numérica.' },
     poll: { label: 'Enquete', icon: '📊', cat: 'opinion', desc: 'Coleta opiniões com alternativas — sem resposta certa e sem pontos.' },
     scale: { label: 'Escala', icon: '📏', cat: 'opinion', desc: 'Os participantes avaliam de 1 a 5 (ex.: discordo → concordo). Sem pontos.' },
+    nps: { label: 'Escala NPS', icon: '💯', cat: 'opinion', desc: 'Meça satisfação e lealdade de 0 a 10 e veja o NPS (promotores − detratores) no telão.' },
+    pin: { label: 'Largar marcador', icon: '📍', cat: 'opinion', desc: 'Os participantes tocam em um ponto da imagem — os marcadores aparecem no telão.' },
     wordcloud: { label: 'Nuvem de palavras', icon: '☁️', cat: 'opinion', desc: 'Respostas livres curtas formam uma nuvem de palavras no telão.' },
+    brainstorm: { label: 'Brainstorm', icon: '💡', cat: 'opinion', desc: 'Colete ideias dos participantes e depois abra a votação para ranquear as melhores.' },
     slide: { label: 'Slide', icon: '🖼️', cat: 'slides', desc: 'Tela de conteúdo (título, texto e imagem) para explicar algo entre as questões.' },
+  };
+
+  // Layouts de slide (estilo Kahoot)
+  const SLIDE_LAYOUTS = {
+    classic: 'Clássico',
+    'big-title': 'Título grande',
+    'title-text': 'Título e texto',
+    bullets: 'Pontos principais',
+    quote: 'Citação',
+    'big-media': 'Mídia grande',
   };
 
   const TIME_OPTIONS = [5, 10, 20, 30, 45, 60, 90, 120, 180, 240];
@@ -75,9 +89,17 @@ const Store = (() => {
       answers: [],           // short: respostas aceitas (texto)
       multi: false,          // quiz: múltipla escolha (selecionar várias antes de enviar)
       maxAnswers: 1,         // wordcloud: quantas respostas cada participante pode enviar (1 a 5)
-      scaleLeft: '',         // scale: rótulo do 1 (ex.: Discordo totalmente)
-      scaleRight: '',        // scale: rótulo do 5 (ex.: Concordo totalmente)
+      scaleLeft: '',         // scale/nps: rótulo da ponta esquerda
+      scaleRight: '',        // scale/nps: rótulo da ponta direita
       body: '',              // slide: texto de apoio
+      layout: 'classic',     // slide: layout visual (SLIDE_LAYOUTS)
+      reactions: true,       // participantes podem reagir com emojis nesta questão
+      maxVotes: 3,           // brainstorm: votos por participante (1 a 5)
+      sliderMin: 0,          // controle deslizante: faixa, passo, resposta e tolerância
+      sliderMax: 100,
+      sliderStep: 1,
+      sliderAnswer: 50,
+      sliderTolerance: 0,
       timeLimit: null,       // segundos; null = usa o padrão do treinamento
       points: 'standard',    // standard | double | none
       ...data,
@@ -96,24 +118,36 @@ const Store = (() => {
       if (!Array.isArray(n.corrects) || n.corrects.length !== 1) n.corrects = [0];
       n.multi = false;
     }
-    if (n.type === 'poll' || n.type === 'wordcloud' || n.type === 'scale' || n.type === 'slide') {
+    const opinion = ['poll', 'wordcloud', 'scale', 'nps', 'pin', 'brainstorm', 'slide'];
+    if (opinion.includes(n.type)) {
       n.corrects = [];
       n.multi = false;
       n.points = 'none';
     }
-    if (n.type === 'short') {
+    if (n.type === 'short' || n.type === 'slider') {
       n.options = [];
       n.corrects = [];
       n.multi = false;
       n.answers = (Array.isArray(n.answers) ? n.answers : []).map(a => String(a));
     }
-    if (n.type === 'scale' || n.type === 'slide') n.options = [];
-    if (n.type === 'wordcloud') {
+    if (['scale', 'nps', 'pin', 'brainstorm', 'slide'].includes(n.type)) n.options = [];
+    if (n.type === 'wordcloud' || n.type === 'brainstorm') {
       n.options = [];
-      n.maxAnswers = Math.min(5, Math.max(1, Math.round(Number(n.maxAnswers)) || 1));
+      n.maxAnswers = Math.min(5, Math.max(1, Math.round(Number(n.maxAnswers)) || (n.type === 'brainstorm' ? 3 : 1)));
     } else {
       n.maxAnswers = 1;
     }
+    n.maxVotes = Math.min(5, Math.max(1, Math.round(Number(n.maxVotes)) || 3));
+    if (n.type === 'slider') {
+      n.sliderMin = Number.isFinite(Number(n.sliderMin)) ? Number(n.sliderMin) : 0;
+      n.sliderMax = Number.isFinite(Number(n.sliderMax)) ? Number(n.sliderMax) : 100;
+      if (n.sliderMax <= n.sliderMin) { n.sliderMin = 0; n.sliderMax = 100; }
+      n.sliderStep = Number(n.sliderStep) > 0 ? Number(n.sliderStep) : 1;
+      n.sliderAnswer = Math.min(n.sliderMax, Math.max(n.sliderMin, Number(n.sliderAnswer) || n.sliderMin));
+      n.sliderTolerance = Number(n.sliderTolerance) >= 0 ? Number(n.sliderTolerance) : 0;
+    }
+    n.layout = SLIDE_LAYOUTS[n.layout] ? n.layout : 'classic';
+    n.reactions = n.reactions !== false;
     return n;
   }
 
@@ -208,7 +242,7 @@ const Store = (() => {
 
   return {
     uid,
-    QUESTION_TYPES, TYPE_CATEGORIES, TIME_OPTIONS, POINTS_OPTIONS,
+    QUESTION_TYPES, TYPE_CATEGORIES, SLIDE_LAYOUTS, TIME_OPTIONS, POINTS_OPTIONS,
     getTrainings, getTraining, upsertTraining, deleteTraining,
     newTraining, newQuestion,
     getResults, addResult, clearResults,
