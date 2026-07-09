@@ -10,8 +10,8 @@
 <body>
   <header class="topbar">
     <a href="#/" class="brand">
-      <!-- Arcos da marca Copérdia (recriados em SVG fiel à logomarca) -->
-      <svg class="brand-icon" viewBox="0 0 100 58" aria-hidden="true">
+      <!-- Logomarca Copérdia (recriada em SVG fiel: arcos + nome) -->
+      <svg class="brand-icon" viewBox="0 0 132 62" aria-hidden="true">
         <defs>
           <linearGradient id="arc-green" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0" stop-color="#5cb947"/>
@@ -24,8 +24,13 @@
             <stop offset="1" stop-color="#ee7d00"/>
           </linearGradient>
         </defs>
-        <path d="M2 52 C 16 8, 46 0, 70 17 L 59 29 C 43 15, 26 22, 14 52 Z" fill="url(#arc-green)"/>
-        <path d="M27 52 C 43 22, 67 16, 93 35 L 84 45 C 67 30, 50 35, 41 52 Z" fill="url(#arc-orange)"/>
+        <g transform="translate(40 2) scale(0.56)">
+          <path d="M2 52 C 16 8, 46 0, 70 17 L 59 29 C 43 15, 26 22, 14 52 Z" fill="url(#arc-green)"/>
+          <path d="M27 52 C 43 22, 67 16, 93 35 L 84 45 C 67 30, 50 35, 41 52 Z" fill="url(#arc-orange)"/>
+        </g>
+        <text x="66" y="52" text-anchor="middle" fill="#1d1d1b"
+              font-family="Arial, Helvetica, sans-serif" font-weight="800"
+              font-size="17.5" letter-spacing="1.2">COPERDIA</text>
       </svg>
       <span>
         <strong>Quiz Copérdia</strong>

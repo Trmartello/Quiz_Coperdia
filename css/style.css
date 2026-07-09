@@ -50,11 +50,11 @@ body {
   line-height: 1.15;
 }
 .brand-icon {
-  width: 52px;
-  height: 32px;
+  width: 96px;
+  height: 45px;
   background: #fff;
   border-radius: 8px;
-  padding: 4px 6px;
+  padding: 3px 6px;
 }
 .brand strong { display: block; font-size: 1.1rem; }
 .brand small { display: block; opacity: 0.85; font-size: 0.75rem; }
