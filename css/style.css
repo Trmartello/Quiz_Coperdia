@@ -1056,8 +1056,10 @@ body.screen-host .chip { font-size: 1.05rem; padding: 8px 16px; }
 }
 
 /* ===== Largar marcador ===== */
-.pin-map { position: relative; display: block; text-align: center; cursor: crosshair; }
-.pin-map img { max-width: 100%; max-height: 46vh; border-radius: 10px; display: inline-block; }
+/* O mapa encolhe para o tamanho exato da imagem — os % dos marcadores casam com a foto */
+.pin-wrap { text-align: center; }
+.pin-map { position: relative; display: inline-block; cursor: crosshair; max-width: 100%; }
+.pin-map img { max-width: 100%; max-height: 46vh; border-radius: 10px; display: block; }
 .pin-map .pin-marker {
   position: absolute;
   transform: translate(-50%, -92%);

@@ -49,9 +49,11 @@ const Live = (() => {
   function listen(pin, params, onState, onError) {
     stop();
     View.key = null;
+    introShown = new Set();
     es = new EventSource(`/api/rooms/${pin}/events?${params}`);
     es.onmessage = e => {
       lastSnap = JSON.parse(e.data);
+      lastSnap._at = Date.now(); // para corrigir o cronômetro ao redesenhar depois (ex.: sair da revisão)
       onState(lastSnap);
     };
     es.addEventListener('reaction', e => {
@@ -115,8 +117,12 @@ const Live = (() => {
 
   /* ---------- Introdução animada da questão (estilo Kahoot) ---------- */
 
-  // Mostra por ~2,2s uma vinheta com nº, tipo e enunciado antes das alternativas
+  // Mostra por ~2,2s uma vinheta com nº, tipo e enunciado antes das alternativas.
+  // Cada questão só ganha vinheta uma vez (não repete ao voltar da revisão, por exemplo).
+  let introShown = new Set();
   function showQuestionIntro(s) {
+    if (introShown.has(s.questionIndex)) return;
+    introShown.add(s.questionIndex);
     const q = s.question;
     const root = document.getElementById('modal-root');
     if (!root || root.querySelector('.q-intro')) return;
@@ -565,9 +571,11 @@ const Live = (() => {
     } else if (q.type === 'pin') {
       const pins = s.pins || [];
       body = `
-        <div class="pin-map pin-result">
-          <img src="${q.image}" alt="">
-          ${pins.map(p => `<span class="pin-marker" style="left:${p.x * 100}%;top:${p.y * 100}%">📍</span>`).join('')}
+        <div class="pin-wrap">
+          <div class="pin-map pin-result">
+            <img src="${q.image}" alt="">
+            ${pins.map(p => `<span class="pin-marker" style="left:${p.x * 100}%;top:${p.y * 100}%">📍</span>`).join('')}
+          </div>
         </div>
         <p class="muted" style="text-align:center;margin-top:8px">${pins.length} marcador${pins.length === 1 ? '' : 'es'} na imagem.</p>
       `;
@@ -591,6 +599,7 @@ const Live = (() => {
           ${(s.correctOrder || []).map((o, i) => `
             <div class="puzzle-item green">
               <span class="puzzle-pos">${i + 1}º</span>
+              ${s.correctImages && s.correctImages[i] ? `<img class="opt-img" src="${s.correctImages[i]}" alt="">` : ''}
               <span class="puzzle-text">${esc(o)}</span>
             </div>`).join('')}
         </div>`;
@@ -684,7 +693,13 @@ const Live = (() => {
     container.querySelector('#btn-rev-live').addEventListener('click', () => {
       Host.review = null;
       View.key = null; // força o redesenho da tela ao vivo
-      if (lastSnap) drawHost(container, lastSnap);
+      if (!lastSnap) return;
+      // Desconta o tempo decorrido desde o snapshot para o cronômetro não "voltar no tempo"
+      const live = { ...lastSnap };
+      if (live.state === 'question' && typeof live.remainingMs === 'number' && live._at) {
+        live.remainingMs = Math.max(0, live.remainingMs - (Date.now() - live._at));
+      }
+      drawHost(container, live);
     });
   }
 
@@ -1150,9 +1165,11 @@ const Live = (() => {
           ${timerHeader(s)}
           <p class="question-text">${esc(q.text)}</p>
           <p class="muted" style="margin-bottom:8px">📍 Toque no ponto da imagem que representa a sua resposta.</p>
-          <div class="pin-map" id="pin-map">
-            <img src="${q.image}" alt="">
-            <span class="pin-marker" id="pin-marker" style="display:none">📍</span>
+          <div class="pin-wrap">
+            <div class="pin-map" id="pin-map">
+              <img src="${q.image}" alt="">
+              <span class="pin-marker" id="pin-marker" style="display:none">📍</span>
+            </div>
           </div>
           <button class="btn btn-primary btn-lg" id="btn-send" style="margin-top:12px" disabled>Enviar marcador</button>
         </div>
@@ -1222,6 +1239,7 @@ const Live = (() => {
           <div class="puzzle-item ${COLORS[dispIdx]}">
             <span class="puzzle-pos">${pos + 1}º</span>
             <span class="shape">${SHAPES[dispIdx]}</span>
+            ${q.optionImages && q.optionImages[dispIdx] ? `<img class="opt-img" src="${q.optionImages[dispIdx]}" alt="">` : ''}
             <span class="puzzle-text">${esc(q.options[dispIdx])}</span>
             <span class="puzzle-moves">
               <button type="button" class="puzzle-up" data-pos="${pos}" ${pos === 0 ? 'disabled' : ''}>▲</button>
@@ -1401,7 +1419,7 @@ const Live = (() => {
           ${me.rank ? `<div class="stat"><strong>${me.rank}º</strong><span>posição</span></div>` : ''}
         </div>
         ${me.rank ? deltaMsg : ''}
-        ${reactionBarHtml()}
+        ${reactionBarHtml(s)}
       </div>
     `;
     wireReactionBar(container);

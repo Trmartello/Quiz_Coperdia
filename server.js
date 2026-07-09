@@ -407,6 +407,7 @@ function snapshotFor(room, conn) {
     }
     if (q.type === 'puzzle') {
       base.correctOrder = q.options; // a ordem correta, revelada só agora
+      base.correctImages = q.optionImages;
       base.orderRight = [...room.players.values()]
         .filter(p => { const a = p.answers.get(room.questionIndex); return a && a.correct; }).length;
     }
