@@ -451,6 +451,7 @@ function snapshotFor(room, conn) {
         answered: !!a,
         correct: a ? a.correct : null,
         points: a ? a.points : 0,
+        value: a ? a.value : null, // a própria resposta, para comparar com a correta no celular
         score: p ? p.score : 0,
         rank: room.quiz.showRanking && me ? me.rank : null,
         delta: room.quiz.showRanking ? (room.rankDeltas.get(conn.playerId) || 0) : 0,

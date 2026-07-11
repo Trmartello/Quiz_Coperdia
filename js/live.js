@@ -1530,7 +1530,7 @@ const Live = (() => {
     } else if (me.correct) {
       icon = '✅'; title = 'Resposta certa!'; detail = `+${me.points} pontos${me.streak > 1 ? ` • 🔥 ${me.streak} acertos seguidos` : ''}`;
     } else {
-      icon = '❌'; title = 'Não foi dessa vez...'; detail = 'A resposta correta está destacada no telão.';
+      icon = '❌'; title = 'Não foi dessa vez...'; detail = '+0 pontos — veja a resposta correta abaixo.';
     }
     const deltaMsg = me.delta > 0
       ? `<p class="rank-move up">🔺 Você subiu ${me.delta} ${me.delta === 1 ? 'posição' : 'posições'}!</p>`
@@ -1542,6 +1542,7 @@ const Live = (() => {
         <div class="big" style="font-size:3rem">${icon}</div>
         <h1>${title}</h1>
         <p class="subtitle">${detail}</p>
+        ${correctAnswerHtml(s)}
         <div class="result-stats">
           <div class="stat"><strong>${me.score ?? 0}</strong><span>pontos</span></div>
           ${me.rank ? `<div class="stat"><strong>${me.rank}º</strong><span>posição</span></div>` : ''}
@@ -1551,6 +1552,54 @@ const Live = (() => {
       </div>
     `;
     wireReactionBar(container);
+  }
+
+  // Mostra no celular a resposta correta (e a do participante, quando errou)
+  function correctAnswerHtml(s) {
+    const q = s.question;
+    const me = s.me || {};
+    const t = q.type;
+    const chip = i => {
+      const color = t === 'tf' ? (i === 0 ? 'blue' : 'red') : COLORS[i];
+      const shape = t === 'tf' ? (i === 0 ? '✔' : '✖') : SHAPES[i];
+      return `<span class="answer-pill ${color}">${shape} ${esc(q.options[i] || '')}</span>`;
+    };
+    if (t === 'quiz' || t === 'tf') {
+      const mine = me.answered ? (Array.isArray(me.value) ? me.value : [me.value]) : null;
+      return `
+        <div class="correct-answer">
+          <p class="muted">Resposta correta:</p>
+          <p>${(s.corrects || []).map(chip).join(' ')}</p>
+          ${mine && me.correct === false ? `
+            <p class="muted" style="margin-top:8px">Sua resposta:</p>
+            <p>${mine.filter(i => Number.isInteger(i)).map(chip).join(' ')}</p>` : ''}
+        </div>`;
+    }
+    if (t === 'short') {
+      const many = (s.acceptedAnswers || []).length > 1;
+      return `
+        <div class="correct-answer">
+          <p class="muted">Resposta${many ? 's aceitas' : ' correta'}:</p>
+          <p>${(s.acceptedAnswers || []).map(a => `<span class="pill pill-pass">✔ ${esc(a)}</span>`).join(' ')}</p>
+          ${me.correct === false && me.value ? `<p class="muted" style="margin-top:8px">Você escreveu: “${esc(me.value)}”</p>` : ''}
+        </div>`;
+    }
+    if (t === 'slider') {
+      return `
+        <div class="correct-answer">
+          <p class="muted">Resposta correta:</p>
+          <p><span class="pill pill-pass">✔ ${s.sliderAnswer}${s.sliderTolerance > 0 ? ` (±${s.sliderTolerance})` : ''}</span></p>
+          ${me.answered && me.value !== null && me.value !== undefined ? `<p class="muted" style="margin-top:8px">Sua resposta: <strong>${Number(me.value)}</strong></p>` : ''}
+        </div>`;
+    }
+    if (t === 'puzzle') {
+      return `
+        <div class="correct-answer">
+          <p class="muted">Ordem correta:</p>
+          <ol class="mini-order">${(s.correctOrder || []).map(o => `<li>${esc(o)}</li>`).join('')}</ol>
+        </div>`;
+    }
+    return '';
   }
 
   function drawPlayerPodium(container, s) {
