@@ -745,6 +745,15 @@ async function handleApi(req, res, urlPath, query) {
     return json(res, 201, { playerId, name, avatar });
   }
 
+  // POST /api/rooms/:pin/forget — este navegador não pertence mais àquele jogador
+  // (computador compartilhado): desvincula o deviceId para não reentrar como ele
+  if (req.method === 'POST' && action === '/forget') {
+    const body = await readBody(req);
+    const p = room.players.get(String(body.playerId || ''));
+    if (p && body.deviceId && p.deviceId === body.deviceId) p.deviceId = '';
+    return json(res, 200, { ok: true });
+  }
+
   // GET /api/rooms/:pin/ping — o participante confere se sua sessão ainda vale nesta sala
   if (req.method === 'GET' && action === '/ping') {
     const ok = room.players.has(query.get('playerId') || '');

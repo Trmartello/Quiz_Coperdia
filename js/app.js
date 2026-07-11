@@ -108,6 +108,27 @@
     `;
   }
 
+  // ---- Bem-vindo de volta: confirma a identidade antes de retomar a sessão ----
+  function renderResume(pin, saved) {
+    app.innerHTML = `
+      <div class="card live-hero join-card">
+        <div class="big-avatar">${esc(saved.avatar || '🙂')}</div>
+        <h1>Bem-vindo de volta!</h1>
+        <p class="subtitle">Você é <strong>${esc(saved.name)}</strong>? Sua pontuação está guardada.</p>
+        <button class="btn btn-primary btn-lg" id="btn-resume">✅ Sim, continuar como ${esc(saved.name)}</button>
+        <button class="btn btn-ghost" id="btn-not-me" style="width:100%;margin-top:10px">Não sou eu — entrar como outra pessoa</button>
+      </div>
+    `;
+    app.querySelector('#btn-resume').addEventListener('click', () => {
+      location.hash = `#/play/${pin}`;
+    });
+    app.querySelector('#btn-not-me').addEventListener('click', async e => {
+      e.target.disabled = true;
+      await Live.forgetSession(pin); // desvincula este navegador do jogador anterior
+      renderHome(pin);
+    });
+  }
+
   // ---- Roteador por hash ----
   function route() {
     Live.stop(); // encerra conexões/timers da tela anterior
@@ -126,12 +147,14 @@
       renderHome();
     } else if (parts[0] === 'join' && parts[1]) {
       const pin = parts[1].replace(/\D/g, '').slice(0, 6);
-      // Sessão válida para este PIN (ex.: caiu e escaneou o QR de novo)? Volta direto ao jogo.
-      if (pin.length === 6 && Live.hasSession(pin)) {
-        location.hash = `#/play/${pin}`;
-        return;
+      // Sessão guardada para este PIN? Confirma a identidade antes de retomar
+      // (em computador compartilhado, outra pessoa pode estar usando o mesmo navegador).
+      const saved = pin.length === 6 ? Live.sessionInfo(pin) : null;
+      if (saved) {
+        renderResume(pin, saved);
+      } else {
+        renderHome(pin);
       }
-      renderHome(pin);
     } else if (parts[0] === 'play' && parts[1]) {
       Live.renderPlayer(app, parts[1]);
     } else if (parts[0] === 'host' && parts[1]) {

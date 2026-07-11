@@ -1117,6 +1117,31 @@ const Live = (() => {
     return restoreSession(pin);
   }
 
+  // Dados da sessão guardada (sem efeitos colaterais) — para a tela "Você é fulano?"
+  function sessionInfo(pin) {
+    try {
+      const saved = JSON.parse(localStorage.getItem('qc_player'));
+      if (saved && saved.pin === pin && saved.id &&
+          Date.now() - (saved.savedAt || 0) < SESSION_TTL_MS) {
+        return { id: saved.id, name: saved.name, avatar: saved.avatar };
+      }
+    } catch { /* ignora */ }
+    return null;
+  }
+
+  // "Não sou eu": limpa a sessão local e desvincula o deviceId do jogador anterior no servidor
+  async function forgetSession(pin) {
+    const saved = sessionInfo(pin);
+    localStorage.removeItem('qc_player');
+    if (!saved) return;
+    try {
+      await api(`/api/rooms/${pin}/forget`, {
+        playerId: saved.id,
+        deviceId: localStorage.getItem('qc_device') || '',
+      });
+    } catch { /* sala pode ter expirado — a limpeza local já basta */ }
+  }
+
   async function renderPlayer(container, pin) {
     stop();
     if (!restoreSession(pin) || Player.pin !== pin) {
@@ -1632,5 +1657,5 @@ const Live = (() => {
   }
 
   // revealBodyHtml: usado pela administração para reassistir os resultados (replay)
-  return { renderHost, renderPlayer, join, stop, hasSession, revealBodyHtml: hostRevealBody };
+  return { renderHost, renderPlayer, join, stop, hasSession, sessionInfo, forgetSession, revealBodyHtml: hostRevealBody };
 })();

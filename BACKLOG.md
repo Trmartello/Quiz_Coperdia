@@ -81,3 +81,18 @@ Notas de implementação:
   `TYPE_LABELS[q.type]` como destaque (fonte grande).
 - Ajustar o CSS da vinheta (`.q-intro*` em `css/style.css`) para centralizar os dois
   elementos restantes em escala maior, e o teste de UI que valida a vinheta (uitest6).
+
+## 5. Confirmação de identidade na reentrada (computador compartilhado) — ✅ ENTREGUE
+
+Com a reentrada automática, um navegador "lembrado" (PC da sala, tablet circulando)
+entrava direto como o participante anterior. Agora, ao abrir o link/QR com uma sessão
+guardada, aparece uma tela de confirmação:
+
+- **"Bem-vindo de volta! Você é <nome>?"** → [Sim, continuar] volta ao jogo com a
+  pontuação preservada;
+- **[Não sou eu — entrar como outra pessoa]** limpa a sessão local e pede ao servidor
+  para desvincular o `deviceId` do jogador anterior (`POST /forget`) — o navegador
+  deixa de ser reconhecido como ele — e abre o formulário normal de entrada.
+
+O participante original continua protegido: se estiver online em outro aparelho, o
+nome segue bloqueado; a pontuação dele fica guardada e pode ser retomada pelo nome.
