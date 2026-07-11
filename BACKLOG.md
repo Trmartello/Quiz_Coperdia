@@ -2,7 +2,7 @@
 
 Itens aprovados para desenvolvimento futuro, em ordem de registro.
 
-## 1. Reassistir os resultados (replay do ao vivo)
+## 1. Reassistir os resultados (replay do ao vivo) — ✅ ENTREGUE
 
 Após o fim do jogo, poder **reassistir os resultados questão a questão**, vendo cada
 gráfico ser preenchido como aconteceu no ao vivo (colunas subindo, nuvem de palavras
@@ -19,7 +19,7 @@ Notas de implementação:
   com navegação questão a questão reaproveitando os renderizadores do telão
   (`hostRevealBody`) + animação temporizada das respostas.
 
-## 2. Compartilhamento com palestrante e tema
+## 2. Compartilhamento com palestrante e tema — ✅ ENTREGUE
 
 No momento de compartilhar o resultado final (WhatsApp, PDF, CSV e imagem), **solicitar
 quem foi o palestrante/instrutor e o tema do Quiz** antes de gerar o conteúdo.
@@ -30,7 +30,7 @@ Notas de implementação:
 - Incluir os dados no cabeçalho do PDF, no texto do WhatsApp, na imagem gerada
   (`sharePng`) e em colunas extras do CSV.
 
-## 3. Resiliência de conexão e reentrada do participante
+## 3. Resiliência de conexão e reentrada do participante — ✅ ENTREGUE
 
 Problemas observados em produção: participantes caem da conexão durante o jogo; ao
 voltar, não conseguem entrar com o mesmo nome ("já existe um participante com esse
@@ -64,3 +64,20 @@ Plano:
 5. **Presença no telão**: contar conexões SSE ativas por jogador e exibir
    "X online / Y inscritos" no lobby e durante as questões (o ✋ passa a usar os
    online); marcar visualmente no ranking quem caiu.
+
+## 4. Vinheta da questão só com número e tipo (sem o enunciado) — ✅ ENTREGUE
+
+A tela verde animada exibida antes de cada questão deve mostrar apenas:
+- o **número da questão no total**, no formato `3/9`;
+- o **modelo de resposta esperado** (ex.: ⚖️ Verdadeiro ou falso, 💬 Pergunta aberta,
+  🧩 Puzzle...).
+
+O enunciado NÃO deve aparecer na vinheta — ele só é revelado quando a questão abre.
+Cria suspense e evita que alguém comece a ler/pensar na resposta antes de o tempo valer.
+
+Notas de implementação:
+- `showQuestionIntro(s)` em `js/live.js`: remover `.q-intro-text` e trocar
+  `.q-intro-num` para `${s.questionIndex + 1}/${s.totalQuestions}`; manter
+  `TYPE_LABELS[q.type]` como destaque (fonte grande).
+- Ajustar o CSS da vinheta (`.q-intro*` em `css/style.css`) para centralizar os dois
+  elementos restantes em escala maior, e o teste de UI que valida a vinheta (uitest6).

@@ -15,6 +15,9 @@ const Live = (() => {
   let es = null;            // EventSource ativo
   let countdown = null;     // interval do timer visual
   let lastSnap = null;      // último snapshot recebido (para decisões pós-await)
+  let lastEventAt = 0;      // último sinal de vida do servidor (dados ou ping)
+  let watchdog = null;      // vigia que reabre a conexão se o stream ficar mudo
+  const Watch = { args: null }; // argumentos do listen() atual, para religar
   // Evita redesenhar a mesma tela a cada snapshot (preserva digitação e animações)
   const View = { key: null };
 
@@ -33,6 +36,8 @@ const Live = (() => {
   function stop() {
     if (es) { es.close(); es = null; }
     if (countdown) { clearInterval(countdown); countdown = null; }
+    if (watchdog) { clearInterval(watchdog); watchdog = null; }
+    Watch.args = null;
   }
 
   async function api(path, body) {
@@ -50,17 +55,39 @@ const Live = (() => {
     stop();
     View.key = null;
     introShown = new Set();
+    Watch.args = [pin, params, onState, onError];
+    lastEventAt = Date.now();
     es = new EventSource(`/api/rooms/${pin}/events?${params}`);
     es.onmessage = e => {
+      lastEventAt = Date.now();
       lastSnap = JSON.parse(e.data);
       lastSnap._at = Date.now(); // para corrigir o cronômetro ao redesenhar depois (ex.: sair da revisão)
       onState(lastSnap);
     };
+    es.addEventListener('ping', () => { lastEventAt = Date.now(); });
     es.addEventListener('reaction', e => {
+      lastEventAt = Date.now();
       try { spawnReaction(JSON.parse(e.data).emoji); } catch { /* ignora */ }
     });
     es.onerror = () => { if (onError) onError(); };
+    // Vigia: o servidor manda um ping a cada 25s; sem sinal por 65s, religa a conexão
+    watchdog = setInterval(() => {
+      if (Date.now() - lastEventAt > 65000) relisten();
+    }, 10000);
   }
+
+  // Religa a conexão SSE atual (após aba suspensa, rede trocada etc.)
+  function relisten() {
+    if (Watch.args) listen(...Watch.args);
+  }
+
+  // Celular voltou à tela / rede voltou: religa na hora se a conexão estiver morta ou muda
+  ['visibilitychange', 'pageshow', 'online'].forEach(ev => {
+    (ev === 'online' || ev === 'pageshow' ? window : document).addEventListener(ev, () => {
+      if (document.visibilityState !== 'visible' || !Watch.args) return;
+      if ((es && es.readyState === 2) || Date.now() - lastEventAt > 30000) relisten();
+    });
+  });
 
   /* ---------- Reações emoji flutuantes (estilo Kahoot) ---------- */
 
@@ -128,10 +155,10 @@ const Live = (() => {
     if (!root || root.querySelector('.q-intro')) return;
     const el = document.createElement('div');
     el.className = 'q-intro';
+    // Só o número (3/9) e o tipo de resposta — o enunciado é revelado quando a questão abre
     el.innerHTML = `
-      <span class="q-intro-num">${s.questionIndex + 1}</span>
+      <span class="q-intro-num">${s.questionIndex + 1}/${s.totalQuestions}</span>
       <span class="q-intro-type">${TYPE_LABELS[q.type] || 'Quiz'}</span>
-      <p class="q-intro-text">${esc(q.text)}</p>
     `;
     root.appendChild(el);
     setTimeout(() => el.remove(), 2400);
@@ -335,7 +362,7 @@ const Live = (() => {
       if (!viewOnce(`hq:${s.questionIndex}:${s.brainPhase || ''}`)) {
         const el = container.querySelector('#host-answered');
         if (el && s.question && s.question.type !== 'slide') {
-          el.textContent = `✋ ${s.answeredCount}/${s.playersCount} ${s.brainPhase === 'vote' ? 'votaram' : 'responderam'}`;
+          el.textContent = answeredLine(s);
         }
         return;
       }
@@ -413,8 +440,9 @@ const Live = (() => {
           <p class="muted" id="conn-note"></p>
         </div>
         <div class="card lobby-side">
+          <button class="btn btn-primary btn-lg" id="btn-start" style="margin-bottom:14px" ${s.playersCount === 0 ? 'disabled' : ''}>▶ Iniciar jogo</button>
           <div class="quiz-header">
-            <h2 style="margin:0">Participantes (${s.playersCount})</h2>
+            <h2 style="margin:0">Participantes (${s.playersCount}${s.onlineCount !== undefined && s.onlineCount < s.playersCount ? ` · ⚡ ${s.onlineCount} online` : ''})</h2>
           </div>
           <div class="player-chips">
             ${s.players && s.players.length
@@ -425,7 +453,6 @@ const Live = (() => {
                   </span>`).join('')
               : '<p class="muted">Aguardando participantes entrarem...</p>'}
           </div>
-          <button class="btn btn-primary btn-lg" id="btn-start" style="margin-top:16px" ${s.playersCount === 0 ? 'disabled' : ''}>▶ Iniciar jogo</button>
         </div>
       </div>
     `;
@@ -440,6 +467,13 @@ const Live = (() => {
       e.target.textContent = '✔ Copiado!';
       setTimeout(() => { e.target.textContent = '📋 Copiar link'; }, 1800);
     });
+  }
+
+  // Contador do telão: respostas/votos + quantos estão realmente conectados
+  function answeredLine(s) {
+    const online = s.onlineCount !== undefined && s.onlineCount < s.playersCount
+      ? ` · ⚡ ${s.onlineCount} online` : '';
+    return `✋ ${s.answeredCount}/${s.playersCount} ${s.brainPhase === 'vote' ? 'votaram' : 'responderam'}${online}`;
   }
 
   function drawHostQuestion(container, s) {
@@ -496,7 +530,7 @@ const Live = (() => {
           ${body}`}
         ${q.multi ? '<p class="muted" style="text-align:center;margin-top:10px">Múltipla escolha: selecione todas as corretas e envie</p>' : ''}
         <div class="quiz-header" style="margin-top:16px">
-          <span class="quiz-progress-text" id="host-answered">${isSlide ? '' : `✋ ${s.answeredCount}/${s.playersCount} ${brainVoting ? 'votaram' : 'responderam'}`}</span>
+          <span class="quiz-progress-text" id="host-answered">${isSlide ? '' : answeredLine(s)}</span>
           <span style="display:flex;gap:8px;align-items:center">
             ${reviewButtonHtml(s.questionIndex)}
             <button class="btn ${isSlide || brainVoting ? 'btn-primary' : 'btn-secondary'}" id="btn-reveal">${btnLabel}</button>
@@ -745,7 +779,7 @@ const Live = (() => {
                 <div class="rank-row">
                   <span class="rank-pos">${p.rank}º</span>
                   ${deltaBadge(p.delta)}
-                  <span class="rank-name"><span class="rank-avatar">${esc(p.avatar || '🙂')}</span> ${esc(p.name)}</span>
+                  <span class="rank-name"><span class="rank-avatar">${esc(p.avatar || '🙂')}</span> ${esc(p.name)}${p.online === false ? ' <span class="rank-offline" title="Desconectado">📴</span>' : ''}</span>
                   <span class="rank-score">${p.score} pts</span>
                 </div>`).join('')}
             </div>
@@ -777,6 +811,15 @@ const Live = (() => {
           date: new Date().toISOString(),
         });
       });
+      // Grava o replay do jogo (reassistir os gráficos sendo preenchidos, questão a questão)
+      if (Array.isArray(s.replay) && s.replay.length) {
+        Store.addReplay({
+          date: new Date().toISOString(),
+          quizName: s.quizName,
+          playersCount: s.results.length,
+          questions: s.replay,
+        });
+      }
     }
 
     const podium = s.leaderboard.slice(0, 3);
@@ -834,13 +877,61 @@ const Live = (() => {
       </div>
     `;
 
-    container.querySelector('#btn-podium-csv').addEventListener('click', () => exportCsv(s));
-    container.querySelector('#btn-podium-pdf').addEventListener('click', () => exportPdf(s));
-    container.querySelector('#btn-podium-whats').addEventListener('click', e => shareWhatsapp(s, e.target));
+    container.querySelector('#btn-podium-csv').addEventListener('click', () => askShareInfo(info => exportCsv(s, info)));
+    container.querySelector('#btn-podium-pdf').addEventListener('click', () => askShareInfo(info => exportPdf(s, info)));
+    container.querySelector('#btn-podium-whats').addEventListener('click', e => askShareInfo(info => shareWhatsapp(s, e.target, info)));
     wireReviewButton(container, null);
   }
 
   /* ---------- Exportações do pódio ---------- */
+
+  // Antes de compartilhar/exportar, pergunta o palestrante e o tema (pré-preenchidos com o último uso)
+  function askShareInfo(cb) {
+    const root = document.getElementById('modal-root');
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('qc_share_info')) || {}; } catch { /* ignora */ }
+    root.innerHTML = `
+      <div class="modal-overlay">
+        <div class="modal" role="dialog" aria-modal="true">
+          <h2>Dados do compartilhamento</h2>
+          <p class="subtitle">Essas informações saem no cabeçalho do resultado.</p>
+          <div class="field">
+            <label for="share-speaker">🎤 Palestrante / instrutor</label>
+            <input type="text" id="share-speaker" maxlength="80" value="${esc(saved.speaker || '')}" placeholder="Quem conduziu o treinamento">
+          </div>
+          <div class="field">
+            <label for="share-theme">📚 Tema do quiz</label>
+            <input type="text" id="share-theme" maxlength="120" value="${esc(saved.theme || '')}" placeholder="Assunto apresentado">
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="share-go">Continuar</button>
+            <button class="btn btn-ghost" id="share-cancel">Cancelar</button>
+          </div>
+        </div>
+      </div>`;
+    const close = () => { root.innerHTML = ''; };
+    root.querySelector('#share-cancel').addEventListener('click', close);
+    root.querySelector('.modal-overlay').addEventListener('mousedown', e => {
+      if (e.target === e.currentTarget) close();
+    });
+    root.querySelector('#share-go').addEventListener('click', () => {
+      const info = {
+        speaker: root.querySelector('#share-speaker').value.trim(),
+        theme: root.querySelector('#share-theme').value.trim(),
+      };
+      localStorage.setItem('qc_share_info', JSON.stringify(info));
+      close();
+      cb(info);
+    });
+    root.querySelector('#share-speaker').focus();
+  }
+
+  function shareInfoLine(info) {
+    const parts = [];
+    if (info && info.speaker) parts.push(`Palestrante: ${info.speaker}`);
+    if (info && info.theme) parts.push(`Tema: ${info.theme}`);
+    return parts.join(' • ');
+  }
 
   function resultRows(s) {
     return s.results.map(r => ({
@@ -854,11 +945,11 @@ const Live = (() => {
     }));
   }
 
-  function exportCsv(s) {
-    const header = ['Posicao', 'Participante', 'Pontos', 'Acertos', 'Nota (%)', 'Situacao'];
+  function exportCsv(s, info = {}) {
+    const header = ['Posicao', 'Participante', 'Pontos', 'Acertos', 'Nota (%)', 'Situacao', 'Palestrante', 'Tema'];
     const csvEsc = v => `"${String(v).replace(/"/g, '""')}"`;
     const lines = [header.join(';')].concat(resultRows(s).map(r =>
-      [r.rank + 'º', r.name, r.score, r.correct, r.percent, r.status].map(csvEsc).join(';')));
+      [r.rank + 'º', r.name, r.score, r.correct, r.percent, r.status, info.speaker || '', info.theme || ''].map(csvEsc).join(';')));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -868,7 +959,7 @@ const Live = (() => {
   }
 
   // Abre uma janela formatada para impressão — o usuário salva como PDF
-  function exportPdf(s) {
+  function exportPdf(s, info = {}) {
     const rows = resultRows(s);
     const w = window.open('', '_blank');
     if (!w) { alert('Permita pop-ups para gerar o PDF.'); return; }
@@ -891,6 +982,7 @@ const Live = (() => {
       </style></head><body>
       <h1>🎓 Quiz Copérdia — Resultado Final</h1>
       <p class="sub"><strong>${esc(s.quizName)}</strong></p>
+      ${shareInfoLine(info) ? `<p class="sub">${esc(shareInfoLine(info))}</p>` : ''}
       <p class="meta">${new Date().toLocaleString('pt-BR')} • ${rows.length} participante(s) •
         aprovação a partir de ${s.passScore}% em ${s.scorableTotal} questão(ões) que valem nota</p>
       <table>
@@ -912,10 +1004,10 @@ const Live = (() => {
   }
 
   // Compartilhar: no celular envia uma IMAGEM do resultado (Web Share); no desktop abre o WhatsApp com o resumo
-  async function shareWhatsapp(s, btn) {
+  async function shareWhatsapp(s, btn, info = {}) {
     const rows = resultRows(s);
     try {
-      const blob = await resultImage(s, rows);
+      const blob = await resultImage(s, rows, info);
       const file = new File([blob], 'resultado-quiz.png', { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: `Resultado — ${s.quizName}` });
@@ -924,16 +1016,19 @@ const Live = (() => {
     } catch { /* cai para o texto */ }
     const top = rows.slice(0, 3).map(r => `${['🥇','🥈','🥉'][r.rank - 1] || r.rank + 'º'} ${r.name} — ${r.score} pts`).join('\n');
     const approved = rows.filter(r => r.status === 'Aprovado').length;
-    const text = `🏁 Resultado do quiz "${s.quizName}"\n\n${top}\n\n` +
+    const infoText = (info.speaker ? `🎤 Palestrante: ${info.speaker}\n` : '') +
+      (info.theme ? `📚 Tema: ${info.theme}\n` : '');
+    const text = `🏁 Resultado do quiz "${s.quizName}"\n${infoText}\n${top}\n\n` +
       (s.scorableTotal > 0 ? `✅ ${approved} de ${rows.length} participantes aprovados (nota mínima ${s.passScore}%).` : `${rows.length} participantes.`);
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
   }
 
   // Desenha o resultado num canvas e devolve um PNG (para o Web Share)
-  function resultImage(s, rows) {
+  function resultImage(s, rows, info = {}) {
     const W = 900;
     const rowH = 46;
-    const top = 170;
+    const infoLine = shareInfoLine(info);
+    const top = infoLine ? 196 : 170;
     const H = top + rows.length * rowH + 90;
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
@@ -947,10 +1042,15 @@ const Live = (() => {
     ctx.fillStyle = '#1d1d1b';
     ctx.font = 'bold 22px Segoe UI, Arial';
     ctx.fillText(s.quizName.slice(0, 60), 28, 128);
+    if (infoLine) {
+      ctx.fillStyle = '#1d1d1b';
+      ctx.font = '16px Segoe UI, Arial';
+      ctx.fillText(infoLine.slice(0, 90), 28, 154);
+    }
     ctx.fillStyle = '#667';
     ctx.font = '15px Segoe UI, Arial';
     ctx.fillText(`${new Date().toLocaleString('pt-BR')} • ${rows.length} participante(s)` +
-      (s.scorableTotal > 0 ? ` • nota mínima ${s.passScore}%` : ''), 28, 154);
+      (s.scorableTotal > 0 ? ` • nota mínima ${s.passScore}%` : ''), 28, infoLine ? 178 : 154);
     rows.forEach((r, i) => {
       const y = top + i * rowH;
       if (r.rank === 1) { ctx.fillStyle = '#e7f5ec'; ctx.fillRect(16, y - 30, W - 32, rowH - 6); }
@@ -977,20 +1077,34 @@ const Live = (() => {
 
   const Player = { pin: null, id: null, name: null, avatar: null };
 
+  // Identificador do aparelho: permite voltar como o MESMO jogador depois de cair
+  function deviceId() {
+    let id = localStorage.getItem('qc_device');
+    if (!id) {
+      id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      localStorage.setItem('qc_device', id);
+    }
+    return id;
+  }
+
   async function join(pin, name, avatar) {
-    const data = await api(`/api/rooms/${pin}/join`, { name, avatar });
+    const data = await api(`/api/rooms/${pin}/join`, { name, avatar, deviceId: deviceId() });
     Player.pin = pin;
     Player.id = data.playerId;
     Player.name = data.name;
     Player.avatar = data.avatar;
-    sessionStorage.setItem('qc_player', JSON.stringify(Player));
+    // localStorage (não sessionStorage): sobrevive à aba descartada em segundo plano no celular
+    localStorage.setItem('qc_player', JSON.stringify({ ...Player, savedAt: Date.now() }));
     return data;
   }
 
+  const SESSION_TTL_MS = 3.5 * 60 * 60 * 1000; // um pouco além do TTL das salas (3h)
+
   function restoreSession(pin) {
     try {
-      const saved = JSON.parse(sessionStorage.getItem('qc_player'));
-      if (saved && saved.pin === pin && saved.id) {
+      const saved = JSON.parse(localStorage.getItem('qc_player'));
+      if (saved && saved.pin === pin && saved.id &&
+          Date.now() - (saved.savedAt || 0) < SESSION_TTL_MS) {
         Object.assign(Player, saved);
         return true;
       }
@@ -998,12 +1112,26 @@ const Live = (() => {
     return false;
   }
 
-  function renderPlayer(container, pin) {
+  // Há sessão válida para este PIN? (usado pelo roteador para pular o formulário de entrada)
+  function hasSession(pin) {
+    return restoreSession(pin);
+  }
+
+  async function renderPlayer(container, pin) {
     stop();
     if (!restoreSession(pin) || Player.pin !== pin) {
       location.hash = '#/';
       return;
     }
+    // Confirma que a sala/jogador ainda existem; sem rede, segue — o SSE reconecta sozinho
+    try {
+      const r = await fetch(`/api/rooms/${pin}/ping?playerId=${encodeURIComponent(Player.id)}`);
+      if (r.status === 404) {
+        localStorage.removeItem('qc_player');
+        location.hash = '#/';
+        return;
+      }
+    } catch { /* offline: deixa o EventSource tentar */ }
     listen(pin, `playerId=${encodeURIComponent(Player.id)}`, s => drawPlayer(container, s), () => {
       const note = container.querySelector('#conn-note');
       if (note) note.textContent = 'Reconectando...';
@@ -1451,8 +1579,9 @@ const Live = (() => {
       </div>
     `;
     wireReactionBar(container);
-    sessionStorage.removeItem('qc_player');
+    localStorage.removeItem('qc_player');
   }
 
-  return { renderHost, renderPlayer, join, stop };
+  // revealBodyHtml: usado pela administração para reassistir os resultados (replay)
+  return { renderHost, renderPlayer, join, stop, hasSession, revealBodyHtml: hostRevealBody };
 })();

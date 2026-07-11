@@ -931,12 +931,132 @@ const Admin = (() => {
     draw();
   }
 
+  /* ==================== Replay: reassistir os resultados do jogo ==================== */
+
+  // Reconstrói um "snapshot de revelação" parcial com as primeiras n respostas
+  function replaySnap(replay, rq, n, final) {
+    const q = rq.question;
+    const events = rq.events.slice(0, n);
+    const s = { question: q, playersCount: replay.playersCount };
+    const t = q.type;
+    if (t === 'wordcloud' || t === 'short') {
+      const m = new Map();
+      for (const ev of events) {
+        const vals = Array.isArray(ev.value) ? ev.value : [ev.value];
+        for (const v of vals) {
+          if (typeof v !== 'string' || !v) continue;
+          const k = v.toLowerCase();
+          const e = m.get(k) || { text: v, count: 0 };
+          e.count++;
+          m.set(k, e);
+        }
+      }
+      s.words = [...m.values()].sort((a, b) => b.count - a.count);
+      if (t === 'short') s.acceptedAnswers = final ? (rq.acceptedAnswers || []) : [];
+    } else if (t === 'slider') {
+      s.sliderValues = events.map(e => e.value);
+      s.sliderAnswer = rq.sliderAnswer;
+      s.sliderTolerance = rq.sliderTolerance || 0;
+    } else if (t === 'pin') {
+      s.pins = events.map(e => e.value);
+    } else if (t === 'open') {
+      s.responses = events.map(e => ({ name: e.name, avatar: e.avatar, text: e.value }));
+    } else if (t === 'puzzle') {
+      s.correctOrder = rq.correctOrder || [];
+      s.orderRight = events.filter(e => e.correct).length;
+    } else if (t === 'brainstorm') {
+      const frac = rq.events.length ? n / rq.events.length : 1;
+      s.ideas = (rq.ideas || []).map(i => ({ ...i, votes: final ? i.votes : Math.round(i.votes * frac) }));
+    } else {
+      // quiz, tf, poll, scale, nps — contagem por alternativa
+      const counts = (q.options || []).map(() => 0);
+      for (const ev of events) {
+        const vals = Array.isArray(ev.value) ? ev.value : [ev.value];
+        for (const v of vals) {
+          if (Number.isInteger(v) && counts[v] !== undefined) counts[v]++;
+        }
+      }
+      s.counts = counts;
+      if (final && (t === 'quiz' || t === 'tf')) s.corrects = rq.corrects || [];
+    }
+    return s;
+  }
+
+  function openReplayModal(replay) {
+    const modal = openModal('', { wide: true });
+    let qi = 0;
+    let timers = [];
+    const clearTimers = () => { timers.forEach(clearTimeout); timers = []; };
+
+    // Reproduz as respostas na ordem/ritmo em que chegaram, comprimidas em ~4s
+    const play = (rq) => {
+      clearTimers();
+      const body = modal.querySelector('#replay-body');
+      const D = 4000;
+      const render = (n, final) => {
+        body.innerHTML = Live.revealBodyHtml(replaySnap(replay, rq, n, final));
+      };
+      render(0, false);
+      rq.events.forEach((ev, i) => {
+        const t = Math.max(80, Math.min(D, (ev.ms / (rq.limitMs || 1)) * D));
+        timers.push(setTimeout(() => render(i + 1, false), t));
+      });
+      timers.push(setTimeout(() => render(rq.events.length, true), D + 400));
+    };
+
+    const draw = () => {
+      clearTimers();
+      const rq = replay.questions[qi];
+      const type = Store.QUESTION_TYPES[rq.question.type];
+      modal.innerHTML = `
+        <button class="modal-close" aria-label="Fechar">✕</button>
+        <h2>▶ Reassistindo — ${esc(replay.quizName)}</h2>
+        <p class="subtitle" style="margin-bottom:10px">
+          Questão ${qi + 1} de ${replay.questions.length} •
+          ${type ? `${type.icon} ${type.label}` : ''} • ${rq.events.length} resposta(s)
+        </p>
+        <p class="question-text q-big">${esc(rq.question.text)}</p>
+        <div id="replay-body" style="min-height:180px"></div>
+        <div class="btn-row">
+          <button class="btn btn-ghost" id="rp-prev" ${qi === 0 ? 'disabled' : ''}>‹ Anterior</button>
+          <button class="btn btn-secondary" id="rp-again">⟲ Repetir</button>
+          <button class="btn btn-primary" id="rp-next" ${qi >= replay.questions.length - 1 ? 'disabled' : ''}>Próxima ›</button>
+        </div>
+      `;
+      modal.querySelector('.modal-close').addEventListener('click', () => { clearTimers(); closeModal(); });
+      modal.querySelector('#rp-prev').addEventListener('click', () => { if (qi > 0) { qi--; draw(); } });
+      modal.querySelector('#rp-next').addEventListener('click', () => { if (qi < replay.questions.length - 1) { qi++; draw(); } });
+      modal.querySelector('#rp-again').addEventListener('click', () => play(replay.questions[qi]));
+      play(rq);
+    };
+
+    draw();
+  }
+
   /* ==================== Aba: Resultados ==================== */
   function renderResultsTab(content) {
     const results = Store.getResults();
     const trainings = [...new Set(results.map(r => r.trainingName))];
+    const replays = Store.getReplays();
 
     content.innerHTML = `
+      ${replays.length ? `
+      <div class="card">
+        <h2>▶ Reassistir jogos (${replays.length})</h2>
+        <p class="muted" style="margin-bottom:10px">
+          Reveja os gráficos de cada questão sendo preenchidos como foram no ao vivo.
+        </p>
+        ${replays.map(r => `
+          <div class="quiz-header replay-row" data-replay="${r.id}" style="border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:8px">
+            <span><strong>${esc(r.quizName)}</strong>
+              <span class="muted">— ${new Date(r.date).toLocaleString('pt-BR')} • ${r.playersCount} participante(s) • ${r.questions.length} questão(ões)</span>
+            </span>
+            <span class="admin-actions">
+              <button class="btn btn-primary btn-sm" data-action="replay">▶ Reassistir</button>
+              <button class="btn btn-ghost btn-sm" data-action="del-replay">Excluir</button>
+            </span>
+          </div>`).join('')}
+      </div>` : ''}
       <div class="card">
         <div class="quiz-header">
           <h2 style="margin:0">Resultados registrados (${results.length})</h2>
@@ -956,6 +1076,17 @@ const Admin = (() => {
         <div class="table-wrap" id="results-table"></div>
       </div>
     `;
+
+    content.querySelectorAll('.replay-row').forEach(row => {
+      const replay = replays.find(r => r.id === row.dataset.replay);
+      row.querySelector('[data-action="replay"]').addEventListener('click', () => openReplayModal(replay));
+      row.querySelector('[data-action="del-replay"]').addEventListener('click', () => {
+        if (confirm('Excluir este replay?')) {
+          Store.deleteReplay(replay.id);
+          renderResultsTab(content);
+        }
+      });
+    });
 
     const tableWrap = content.querySelector('#results-table');
     const filterSel = content.querySelector('#filter-training');

@@ -201,6 +201,30 @@ const Store = (() => {
     write(KEY_RESULTS, []);
   }
 
+  // ---- Replays (reassistir o preenchimento dos resultados) ----
+  const KEY_REPLAYS = 'qc_replays';
+
+  function getReplays() {
+    return read(KEY_REPLAYS, []);
+  }
+
+  function addReplay(replay) {
+    const all = getReplays();
+    all.unshift({ id: uid(), ...replay });
+    while (all.length > 10) all.pop(); // guarda só os 10 jogos mais recentes
+    // Quota do localStorage: se não couber, descarta os mais antigos até caber
+    for (;;) {
+      try { write(KEY_REPLAYS, all); return; } catch {
+        if (all.length <= 1) return;
+        all.pop();
+      }
+    }
+  }
+
+  function deleteReplay(id) {
+    write(KEY_REPLAYS, getReplays().filter(r => r.id !== id));
+  }
+
   // ---- PIN da administração ----
   function getPin() {
     return read(KEY_PIN, DEFAULT_PIN);
@@ -254,6 +278,7 @@ const Store = (() => {
     getTrainings, getTraining, upsertTraining, deleteTraining,
     newTraining, newQuestion,
     getResults, addResult, clearResults,
+    getReplays, addReplay, deleteReplay,
     getPin, setPin,
     seedIfEmpty,
   };

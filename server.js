@@ -230,6 +230,7 @@ function createRoom(quiz) {
     questionStartedAt: 0,
     questionTimer: null,
     brain: null, // brainstorm: { phase: 'ideas'|'vote', ideas: [{text,count}], votes: Map(playerId -> [índices]) }
+    archive: new Map(), // questionIndex -> dados que não dá para recompor depois (ideias/votos do brainstorm)
     players: new Map(), // playerId -> { name, score, streak, correctCount, answers: Map(qIdx -> {value, ms, correct, points}) }
     prevRanks: new Map(),  // playerId -> posição antes da questão atual (para o "subiu/desceu")
     rankDeltas: new Map(), // playerId -> variação de posição na última revelação
@@ -300,6 +301,22 @@ function wordCloud(room) {
   return [...words.values()].sort((a, b) => b.count - a.count).slice(0, 60);
 }
 
+// Presença: um jogador está "online" se tem uma conexão SSE ativa
+function isConnected(room, playerId) {
+  for (const c of room.connections) {
+    if (c.role === 'player' && c.playerId === playerId) return true;
+  }
+  return false;
+}
+
+function onlineCount(room) {
+  const ids = new Set();
+  for (const c of room.connections) {
+    if (c.role === 'player' && room.players.has(c.playerId)) ids.add(c.playerId);
+  }
+  return ids.size;
+}
+
 function answeredCount(room) {
   // Na fase de votação do brainstorm, conta quem já votou
   if (room.brain && room.brain.phase === 'vote') return room.brain.votes.size;
@@ -347,6 +364,7 @@ function snapshotFor(room, conn) {
     totalQuestions: room.quiz.questions.length,
     questionIndex: room.questionIndex,
     playersCount: room.players.size,
+    onlineCount: onlineCount(room),
   };
   const q = currentQuestion(room);
 
@@ -421,7 +439,7 @@ function snapshotFor(room, conn) {
     if (room.quiz.showRanking) {
       // top 10 — o telão exibe em duas colunas de 5
       base.leaderboard = leaderboard(room).slice(0, 10)
-        .map(p => ({ ...p, delta: room.rankDeltas.get(p.id) || 0 }));
+        .map(p => ({ ...p, delta: room.rankDeltas.get(p.id) || 0, online: isConnected(room, p.id) }));
     }
     base.isLast = room.questionIndex + 1 >= room.quiz.questions.length;
     if (conn.role === 'player') {
@@ -454,6 +472,38 @@ function snapshotFor(room, conn) {
     });
     if (conn.role === 'player') {
       base.me = base.results.find(x => x.id === conn.playerId) || null;
+    }
+    if (conn.role === 'host') {
+      // Replay: dados por questão para "reassistir" o preenchimento depois (sem imagens — quota
+      // do localStorage do instrutor; exceção: largar marcador, que não faz sentido sem a foto)
+      base.replay = room.quiz.questions.map((q, qi) => {
+        if (q.type === 'slide') return null;
+        const rq = {
+          question: {
+            type: q.type, text: q.text,
+            options: q.options, optionImages: [],
+            multi: q.multi, scaleLeft: q.scaleLeft, scaleRight: q.scaleRight,
+            maxAnswers: q.maxAnswers, maxVotes: q.maxVotes,
+            sliderMin: q.sliderMin, sliderMax: q.sliderMax,
+            image: q.type === 'pin' ? q.image : null,
+          },
+          limitMs: ((q.timeLimit || room.quiz.timePerQuestion) * 1000),
+          corrects: q.corrects,
+          acceptedAnswers: q.type === 'short' ? q.answers : undefined,
+          sliderAnswer: q.type === 'slider' ? q.sliderAnswer : undefined,
+          sliderTolerance: q.type === 'slider' ? q.sliderTolerance : undefined,
+          correctOrder: q.type === 'puzzle' ? q.options : undefined,
+          ideas: (room.archive.get(qi) || {}).ideas,
+          events: [],
+        };
+        for (const p of room.players.values()) {
+          const a = p.answers.get(qi);
+          if (!a) continue;
+          rq.events.push({ ms: a.ms, value: a.value, correct: a.correct, name: p.name, avatar: p.avatar });
+        }
+        rq.events.sort((x, y) => x.ms - y.ms);
+        return rq;
+      }).filter(Boolean);
     }
   }
 
@@ -517,6 +567,10 @@ function reveal(room) {
   if (room.state !== 'question') return;
   clearTimeout(room.questionTimer);
   room.state = 'reveal';
+  // Arquiva o que o replay não consegue recompor das respostas individuais
+  if (room.brain) {
+    room.archive.set(room.questionIndex, { ideas: brainRanked(room) });
+  }
   // Variação de posição: compara com o ranking anterior a esta questão
   const lb = leaderboard(room);
   room.rankDeltas = new Map(lb.map(p => {
@@ -644,25 +698,56 @@ async function handleApi(req, res, urlPath, query) {
   if (!room) return json(res, 404, { error: 'Sala não encontrada. Confira o PIN.' });
   const action = match[2] || '';
 
-  // POST /api/rooms/:pin/join — participante entra na sala
+  // POST /api/rooms/:pin/join — participante entra na sala (ou VOLTA após cair)
   if (req.method === 'POST' && action === '/join') {
     const body = await readBody(req);
     const name = String(body.name || '').trim().slice(0, 40);
-    if (!name) return json(res, 400, { error: 'Informe seu nome.' });
+    const deviceId = String(body.deviceId || '').slice(0, 80);
     if (room.state === 'podium') return json(res, 409, { error: 'Este jogo já foi encerrado.' });
-    const taken = [...room.players.values()].some(p => p.name.toLowerCase() === name.toLowerCase());
-    if (taken) return json(res, 409, { error: 'Já existe um participante com esse nome. Use outro.' });
+
+    // Reentrada pelo aparelho: o mesmo deviceId volta como o MESMO jogador (pontuação preservada)
+    if (deviceId) {
+      for (const [id, p] of room.players) {
+        if (p.deviceId && p.deviceId === deviceId) {
+          touch(room);
+          broadcast(room);
+          return json(res, 200, { playerId: id, name: p.name, avatar: p.avatar, rejoined: true });
+        }
+      }
+    }
+
+    if (!name) return json(res, 400, { error: 'Informe seu nome.' });
+    const existing = [...room.players.entries()]
+      .find(([, p]) => p.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      const [id, p] = existing;
+      // O nome só é recusado se o dono estiver conectado; desconectado = é a mesma pessoa voltando
+      if (isConnected(room, id)) {
+        return json(res, 409, { error: 'Já existe um participante com esse nome. Use outro.' });
+      }
+      if (deviceId) p.deviceId = deviceId;
+      touch(room);
+      broadcast(room);
+      return json(res, 200, { playerId: id, name: p.name, avatar: p.avatar, rejoined: true });
+    }
+
     if (room.players.size >= 200) return json(res, 409, { error: 'A sala está cheia.' });
     const avatar = AVATARS.includes(body.avatar)
       ? body.avatar
       : AVATARS[Math.floor(Math.random() * AVATARS.length)];
     const playerId = uid();
     room.players.set(playerId, {
-      name, avatar, score: 0, streak: 0, correctCount: 0, answers: new Map(),
+      name, avatar, deviceId, score: 0, streak: 0, correctCount: 0, answers: new Map(),
     });
     touch(room);
     broadcast(room);
     return json(res, 201, { playerId, name, avatar });
+  }
+
+  // GET /api/rooms/:pin/ping — o participante confere se sua sessão ainda vale nesta sala
+  if (req.method === 'GET' && action === '/ping') {
+    const ok = room.players.has(query.get('playerId') || '');
+    return json(res, ok ? 200 : 404, ok ? { ok: true } : { error: 'Participante não encontrado.' });
   }
 
   // POST /api/rooms/:pin/react — reação emoji; flutua nas telas de todos (evento SSE, sem estado)
@@ -778,12 +863,15 @@ async function handleApi(req, res, urlPath, query) {
     });
     room.connections.add(conn);
     res.write(`data: ${JSON.stringify(snapshotFor(room, conn))}\n\n`);
+    // Como evento nomeado (não comentário): o cliente usa como sinal de vida para o vigia de conexão
     const heartbeat = setInterval(() => {
-      try { res.write(': ping\n\n'); } catch { /* ignora */ }
+      try { res.write('event: ping\ndata: {}\n\n'); } catch { /* ignora */ }
     }, 25000);
+    if (conn.role === 'player') broadcast(room); // atualiza o "online" nos telões
     req.on('close', () => {
       clearInterval(heartbeat);
       room.connections.delete(conn);
+      if (conn.role === 'player') broadcast(room);
     });
     return;
   }

@@ -125,7 +125,13 @@
     if (parts[0] === '' || parts[0] === undefined) {
       renderHome();
     } else if (parts[0] === 'join' && parts[1]) {
-      renderHome(parts[1].replace(/\D/g, '').slice(0, 6));
+      const pin = parts[1].replace(/\D/g, '').slice(0, 6);
+      // Sessão válida para este PIN (ex.: caiu e escaneou o QR de novo)? Volta direto ao jogo.
+      if (pin.length === 6 && Live.hasSession(pin)) {
+        location.hash = `#/play/${pin}`;
+        return;
+      }
+      renderHome(pin);
     } else if (parts[0] === 'play' && parts[1]) {
       Live.renderPlayer(app, parts[1]);
     } else if (parts[0] === 'host' && parts[1]) {
