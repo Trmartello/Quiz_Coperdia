@@ -4,7 +4,7 @@ const Live = (() => {
   const COLORS = ['red', 'blue', 'yellow', 'green', 'purple', 'orange'];
   const SHAPES = ['▲', '◆', '●', '■', '★', '⬟'];
   // Mesma lista do servidor — reações rápidas permitidas
-  const REACTIONS = ['👍','👏','❤️','😂','🤔','😮'];
+  const REACTIONS = ['👍','👏','❤️','😂','🤪','😮','🚀','🏎️'];
   const TYPE_LABELS = {
     quiz: '🎯 Quiz', tf: '⚖️ Verdadeiro ou falso', short: '⌨️ Resposta curta',
     slider: '🎚️ Controle deslizante', puzzle: '🧩 Puzzle', poll: '📊 Enquete', scale: '📏 Escala',
@@ -101,10 +101,14 @@ const Live = (() => {
     return layer;
   }
 
-  // Faz um emoji gigante subir flutuando pela tela
+  // Cada reação tem sua animação: carro cruza a tela deixando poeira, foguete decola
+  // com rastro, careta estoura gigante — os demais sobem flutuando
   function spawnReaction(emoji) {
     const layer = reactionLayer();
     if (layer.childElementCount > 40) return; // não sobrecarrega em salas grandes
+    if (emoji === '🏎️') return spawnRacer(layer, emoji);
+    if (emoji === '🚀') return spawnRocket(layer, emoji);
+    if (emoji === '🤪') return spawnBigFace(layer, emoji);
     const el = document.createElement('span');
     el.className = 'float-emoji';
     el.textContent = emoji;
@@ -112,6 +116,58 @@ const Live = (() => {
     el.style.setProperty('--dur', (2.2 + Math.random() * 1.2).toFixed(2) + 's');
     el.style.setProperty('--rot', (Math.random() * 36 - 18).toFixed(0) + 'deg');
     el.style.fontSize = (1.8 + Math.random() * 1.4).toFixed(2) + 'rem';
+    el.addEventListener('animationend', () => el.remove());
+    layer.appendChild(el);
+  }
+
+  // Rastro de fumacinhas que fica para trás de um elemento em movimento
+  function dustTrail(layer, el, puffEmoji) {
+    const trail = setInterval(() => {
+      if (!el.isConnected) return clearInterval(trail);
+      const r = el.getBoundingClientRect();
+      if (!r.width) return;
+      const p = document.createElement('span');
+      p.className = 'dust-puff';
+      p.textContent = puffEmoji;
+      p.style.left = Math.max(0, r.left - 6) + 'px';
+      p.style.top = (r.top + r.height * 0.55) + 'px';
+      p.addEventListener('animationend', () => p.remove());
+      layer.appendChild(p);
+    }, 100);
+    el.addEventListener('animationend', () => { clearInterval(trail); el.remove(); });
+  }
+
+  // 🏎️ atravessa a tela em alta velocidade deixando poeira
+  function spawnRacer(layer, emoji) {
+    const el = document.createElement('span');
+    el.className = 'race-emoji';
+    el.textContent = emoji;
+    el.style.top = (15 + Math.random() * 70) + '%';
+    el.style.setProperty('--dur', (1.1 + Math.random() * 0.7).toFixed(2) + 's');
+    el.style.fontSize = (2.4 + Math.random() * 1.4).toFixed(2) + 'rem';
+    layer.appendChild(el);
+    dustTrail(layer, el, '💨');
+  }
+
+  // 🚀 decola na diagonal com rastro de faíscas
+  function spawnRocket(layer, emoji) {
+    const el = document.createElement('span');
+    el.className = 'rocket-emoji';
+    el.textContent = emoji;
+    el.style.left = (Math.random() * 30) + '%';
+    el.style.setProperty('--dur', (1.3 + Math.random() * 0.6).toFixed(2) + 's');
+    el.style.fontSize = (2.4 + Math.random() * 1.2).toFixed(2) + 'rem';
+    layer.appendChild(el);
+    dustTrail(layer, el, '✨');
+  }
+
+  // 🤪 careta gigante que estoura no meio da tela balançando
+  function spawnBigFace(layer, emoji) {
+    const el = document.createElement('span');
+    el.className = 'face-emoji';
+    el.textContent = emoji;
+    el.style.left = (30 + Math.random() * 40) + '%';
+    el.style.top = (28 + Math.random() * 34) + '%';
     el.addEventListener('animationend', () => el.remove());
     layer.appendChild(el);
   }
