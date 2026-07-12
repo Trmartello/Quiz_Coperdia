@@ -3,6 +3,11 @@
 (() => {
   const app = document.getElementById('app');
 
+  // Versão exibida no rodapé — atualize a cada publicação para conferir se o navegador está com o código novo
+  const QC_VERSION = 'v2026-07-13.1';
+  const versionEl = document.getElementById('app-version');
+  if (versionEl) versionEl.textContent = QC_VERSION;
+
   // Mesma lista do servidor — avatares permitidos
   const AVATARS = ['😀','😎','🤩','😜','🤓','😺','🐶','🐼','🦊','🦁','🐸','🐵','🦄','🐙','🐝','🦉','🚀','⚽','🎮','🎸','🔥','⭐','🍕','🤖','👻','🤠','💪','🧠','🎯','🏆'];
 

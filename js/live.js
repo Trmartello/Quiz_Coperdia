@@ -795,31 +795,36 @@ const Live = (() => {
   function drawHostPodium(container, s) {
     if (countdown) clearInterval(countdown);
 
-    // Grava os resultados no registro local do instrutor (uma vez por jogo)
+    // Grava os resultados no registro local do instrutor (uma vez por jogo).
+    // Cada gravação é independente: uma falha (ex.: quota) não pode impedir as demais nem o pódio.
     if (!Host.saved) {
       Host.saved = true;
-      s.results.forEach(r => {
-        Store.addResult({
-          trainingId: 'live-' + Host.pin,
-          trainingName: s.quizName + ' (ao vivo)',
-          participant: r.name,
-          correct: r.correct,
-          total: s.scorableTotal,
-          score: r.percent,
-          passed: r.passed,
-          durationSec: 0,
-          date: new Date().toISOString(),
+      try {
+        s.results.forEach(r => {
+          Store.addResult({
+            trainingId: 'live-' + Host.pin,
+            trainingName: s.quizName + ' (ao vivo)',
+            participant: r.name,
+            correct: r.correct,
+            total: s.scorableTotal,
+            score: r.percent,
+            passed: r.passed,
+            durationSec: 0,
+            date: new Date().toISOString(),
+          });
         });
-      });
+      } catch { /* quota cheia — não impede o replay nem o pódio */ }
       // Grava o replay do jogo (reassistir os gráficos sendo preenchidos, questão a questão)
-      if (Array.isArray(s.replay) && s.replay.length) {
-        Store.addReplay({
-          date: new Date().toISOString(),
-          quizName: s.quizName,
-          playersCount: s.results.length,
-          questions: s.replay,
-        });
-      }
+      try {
+        if (Array.isArray(s.replay) && s.replay.length) {
+          Store.addReplay({
+            date: new Date().toISOString(),
+            quizName: s.quizName,
+            playersCount: s.results.length,
+            questions: s.replay,
+          });
+        }
+      } catch { /* idem */ }
     }
 
     const podium = s.leaderboard.slice(0, 3);

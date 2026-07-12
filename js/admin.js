@@ -1040,12 +1040,17 @@ const Admin = (() => {
     const replays = Store.getReplays();
 
     content.innerHTML = `
-      ${replays.length ? `
       <div class="card">
         <h2>▶ Reassistir jogos (${replays.length})</h2>
         <p class="muted" style="margin-bottom:10px">
           Reveja os gráficos de cada questão sendo preenchidos como foram no ao vivo.
         </p>
+        ${replays.length === 0 ? `
+          <div class="notice notice-info">
+            Nenhum jogo gravado ainda. Cada jogo ao vivo <strong>concluído até o pódio neste navegador</strong>
+            fica disponível aqui para reassistir (os 10 mais recentes). Se o telão ficou aberto de uma versão
+            anterior do sistema, recarregue a página dele uma vez antes de iniciar o próximo jogo.
+          </div>` : ''}
         ${replays.map(r => `
           <div class="quiz-header replay-row" data-replay="${r.id}" style="border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:8px">
             <span><strong>${esc(r.quizName)}</strong>
@@ -1056,7 +1061,7 @@ const Admin = (() => {
               <button class="btn btn-ghost btn-sm" data-action="del-replay">Excluir</button>
             </span>
           </div>`).join('')}
-      </div>` : ''}
+      </div>
       <div class="card">
         <div class="quiz-header">
           <h2 style="margin:0">Resultados registrados (${results.length})</h2>
