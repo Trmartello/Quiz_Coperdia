@@ -310,6 +310,7 @@ const Live = (() => {
 
     // Embaralha a ordem das questões, se configurado no treinamento
     const quiz = { ...training };
+    quiz.logo = Store.getLogo() || undefined; // logomarca personalizada segue para os celulares
     if (training.shuffleQuestions) {
       const qs = training.questions.slice();
       for (let i = qs.length - 1; i > 0; i--) {
@@ -1098,6 +1099,8 @@ const Live = (() => {
     Player.id = data.playerId;
     Player.name = data.name;
     Player.avatar = data.avatar;
+    Player.logo = data.logo || null; // logomarca personalizada da sala
+    if (Player.logo && window.QCApplyLogo) window.QCApplyLogo(Player.logo);
     // localStorage (não sessionStorage): sobrevive à aba descartada em segundo plano no celular
     localStorage.setItem('qc_player', JSON.stringify({ ...Player, savedAt: Date.now() }));
     return data;
@@ -1162,6 +1165,7 @@ const Live = (() => {
         return;
       }
     } catch { /* offline: deixa o EventSource tentar */ }
+    if (Player.logo && window.QCApplyLogo) window.QCApplyLogo(Player.logo);
     listen(pin, `playerId=${encodeURIComponent(Player.id)}`, s => drawPlayer(container, s), () => {
       const note = container.querySelector('#conn-note');
       if (note) note.textContent = 'Reconectando...';

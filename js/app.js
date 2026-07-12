@@ -4,9 +4,28 @@
   const app = document.getElementById('app');
 
   // Versão exibida no rodapé — atualize a cada publicação para conferir se o navegador está com o código novo
-  const QC_VERSION = 'v2026-07-13.1';
+  const QC_VERSION = 'v2026-07-13.2';
   const versionEl = document.getElementById('app-version');
   if (versionEl) versionEl.textContent = QC_VERSION;
+
+  // Logomarca personalizada: troca o logotipo no retângulo branco da topbar.
+  // Guarda o SVG padrão para poder restaurar.
+  const defaultBrandHtml = (document.querySelector('.brand-icon') || {}).outerHTML || '';
+  function applyLogo(dataUrl) {
+    const current = document.querySelector('.brand-icon');
+    if (!current) return;
+    if (dataUrl) {
+      const img = document.createElement('img');
+      img.className = 'brand-icon brand-custom';
+      img.src = dataUrl;
+      img.alt = 'Logomarca';
+      current.replaceWith(img);
+    } else if (defaultBrandHtml) {
+      current.outerHTML = defaultBrandHtml;
+    }
+  }
+  window.QCApplyLogo = applyLogo; // usado por live.js (jogador) e admin.js (upload)
+  applyLogo(Store.getLogo());
 
   // Mesma lista do servidor — avatares permitidos
   const AVATARS = ['😀','😎','🤩','😜','🤓','😺','🐶','🐼','🦊','🦁','🐸','🐵','🦄','🐙','🐝','🦉','🚀','⚽','🎮','🎸','🔥','⭐','🍕','🤖','👻','🤠','💪','🧠','🎯','🏆'];

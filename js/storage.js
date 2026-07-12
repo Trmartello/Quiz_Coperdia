@@ -225,6 +225,21 @@ const Store = (() => {
     write(KEY_REPLAYS, getReplays().filter(r => r.id !== id));
   }
 
+  // ---- Logomarca personalizada (substitui a padrão na topbar) ----
+  const KEY_LOGO = 'qc_logo';
+
+  function getLogo() {
+    return localStorage.getItem(KEY_LOGO) || null;
+  }
+
+  function setLogo(dataUrl) {
+    localStorage.setItem(KEY_LOGO, dataUrl);
+  }
+
+  function clearLogo() {
+    localStorage.removeItem(KEY_LOGO);
+  }
+
   // ---- PIN da administração ----
   function getPin() {
     return read(KEY_PIN, DEFAULT_PIN);
@@ -280,6 +295,7 @@ const Store = (() => {
     getResults, addResult, clearResults,
     getReplays, addReplay, deleteReplay,
     getPin, setPin,
+    getLogo, setLogo, clearLogo,
     seedIfEmpty,
   };
 })();

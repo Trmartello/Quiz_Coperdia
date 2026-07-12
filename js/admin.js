@@ -1175,6 +1175,23 @@ const Admin = (() => {
         <button class="btn btn-primary" id="btn-save-pin">Salvar PIN</button>
       </div>
       <div class="card">
+        <h2>Logomarca do sistema</h2>
+        <p class="muted" style="margin-bottom:14px">
+          A imagem substitui a logomarca no topo de todas as telas deste navegador e também aparece
+          nos celulares dos participantes durante os jogos iniciados aqui. Prefira uma imagem
+          horizontal com fundo branco ou transparente.
+        </p>
+        <div class="logo-preview">
+          ${Store.getLogo()
+            ? `<img src="${Store.getLogo()}" alt="Logomarca atual">`
+            : '<span class="muted">Usando a logomarca padrão Copérdia.</span>'}
+        </div>
+        <div class="btn-row" style="margin:0">
+          <button class="btn btn-secondary" id="btn-upload-logo">🖼️ Carregar logomarca</button>
+          ${Store.getLogo() ? '<button class="btn btn-ghost" id="btn-reset-logo">Restaurar padrão</button>' : ''}
+        </div>
+      </div>
+      <div class="card">
         <h2>Backup dos treinamentos</h2>
         <p class="muted" style="margin-bottom:14px">
           Exporte os treinamentos para um arquivo JSON (para guardar ou levar a outro navegador) e importe quando precisar.
@@ -1203,6 +1220,20 @@ const Admin = (() => {
       msg.style.color = 'var(--success)';
       content.querySelector('#new-pin').value = '';
       content.querySelector('#new-pin2').value = '';
+    });
+
+    content.querySelector('#btn-upload-logo').addEventListener('click', () => {
+      pickImage(600, dataUrl => {
+        Store.setLogo(dataUrl);
+        if (window.QCApplyLogo) window.QCApplyLogo(dataUrl);
+        renderSettingsTab(content);
+      });
+    });
+    const resetLogo = content.querySelector('#btn-reset-logo');
+    if (resetLogo) resetLogo.addEventListener('click', () => {
+      Store.clearLogo();
+      if (window.QCApplyLogo) window.QCApplyLogo(null);
+      renderSettingsTab(content);
     });
 
     content.querySelector('#btn-export').addEventListener('click', () => {

@@ -211,6 +211,7 @@ function sanitizeQuiz(quiz) {
   if (questions.length === 0) return null;
   return {
     name: String(quiz.name).slice(0, 200),
+    logo: sanitizeImage(quiz.logo, 300_000), // logomarca personalizada (vai aos celulares no join)
     passScore: Math.min(100, Math.max(0, Number(quiz.passScore) || 0)),
     timePerQuestion: defaultTime >= 5 && defaultTime <= 600 ? Math.round(defaultTime) : DEFAULT_TIME,
     showRanking: quiz.showRanking !== false,
@@ -712,7 +713,7 @@ async function handleApi(req, res, urlPath, query) {
         if (p.deviceId && p.deviceId === deviceId) {
           touch(room);
           broadcast(room);
-          return json(res, 200, { playerId: id, name: p.name, avatar: p.avatar, rejoined: true });
+          return json(res, 200, { playerId: id, name: p.name, avatar: p.avatar, rejoined: true, logo: room.quiz.logo || null });
         }
       }
     }
@@ -729,7 +730,7 @@ async function handleApi(req, res, urlPath, query) {
       if (deviceId) p.deviceId = deviceId;
       touch(room);
       broadcast(room);
-      return json(res, 200, { playerId: id, name: p.name, avatar: p.avatar, rejoined: true });
+      return json(res, 200, { playerId: id, name: p.name, avatar: p.avatar, rejoined: true, logo: room.quiz.logo || null });
     }
 
     if (room.players.size >= 200) return json(res, 409, { error: 'A sala está cheia.' });
@@ -742,7 +743,7 @@ async function handleApi(req, res, urlPath, query) {
     });
     touch(room);
     broadcast(room);
-    return json(res, 201, { playerId, name, avatar });
+    return json(res, 201, { playerId, name, avatar, logo: room.quiz.logo || null });
   }
 
   // POST /api/rooms/:pin/forget — este navegador não pertence mais àquele jogador

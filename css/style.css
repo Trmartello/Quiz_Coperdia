@@ -1242,3 +1242,15 @@ body.screen-host .open-card p { font-size: 1.15rem; }
   font-weight: 700;
 }
 .mini-order li { margin-bottom: 3px; }
+
+/* Logomarca personalizada */
+img.brand-icon { object-fit: contain; }
+.logo-preview { margin-bottom: 14px; }
+.logo-preview img {
+  max-height: 64px;
+  max-width: 280px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+}
