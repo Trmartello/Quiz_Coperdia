@@ -4,7 +4,7 @@
   const app = document.getElementById('app');
 
   // Versão exibida no rodapé — atualize a cada publicação para conferir se o navegador está com o código novo
-  const QC_VERSION = 'v2026-07-13.2';
+  const QC_VERSION = 'v2026-07-13.3';
   const versionEl = document.getElementById('app-version');
   if (versionEl) versionEl.textContent = QC_VERSION;
 
@@ -19,6 +19,10 @@
       img.className = 'brand-icon brand-custom';
       img.src = dataUrl;
       img.alt = 'Logomarca';
+      // Link quebrado (imagem fora do ar)? Volta para a logomarca padrão
+      img.addEventListener('error', () => {
+        if (defaultBrandHtml && img.isConnected) img.outerHTML = defaultBrandHtml;
+      });
       current.replaceWith(img);
     } else if (defaultBrandHtml) {
       current.outerHTML = defaultBrandHtml;

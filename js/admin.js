@@ -1186,10 +1186,18 @@ const Admin = (() => {
             ? `<img src="${Store.getLogo()}" alt="Logomarca atual">`
             : '<span class="muted">Usando a logomarca padrão Copérdia.</span>'}
         </div>
-        <div class="btn-row" style="margin:0">
+        <div class="btn-row" style="margin:0 0 14px">
           <button class="btn btn-secondary" id="btn-upload-logo">🖼️ Carregar logomarca</button>
           ${Store.getLogo() ? '<button class="btn btn-ghost" id="btn-reset-logo">Restaurar padrão</button>' : ''}
         </div>
+        <div class="field-row" style="align-items:flex-end">
+          <div class="field" style="margin-bottom:0">
+            <label for="logo-url">Ou cole o link de uma imagem</label>
+            <input type="text" id="logo-url" placeholder="https://portal.coperdia.com.br/.../logo.png">
+          </div>
+          <button class="btn btn-secondary" id="btn-logo-url">Usar link</button>
+        </div>
+        <p class="muted" id="logo-msg" style="margin-top:8px"></p>
       </div>
       <div class="card">
         <h2>Backup dos treinamentos</h2>
@@ -1234,6 +1242,34 @@ const Admin = (() => {
       Store.clearLogo();
       if (window.QCApplyLogo) window.QCApplyLogo(null);
       renderSettingsTab(content);
+    });
+
+    // Logomarca por link: testa o carregamento antes de salvar
+    content.querySelector('#btn-logo-url').addEventListener('click', () => {
+      const url = content.querySelector('#logo-url').value.trim();
+      const msg = content.querySelector('#logo-msg');
+      if (!/^https?:\/\//i.test(url)) {
+        msg.textContent = 'Informe um link começando com http:// ou https://';
+        msg.style.color = 'var(--danger)';
+        return;
+      }
+      msg.textContent = 'Testando o link...';
+      msg.style.color = '';
+      const probe = new Image();
+      const timeout = setTimeout(() => { probe.src = ''; fail(); }, 8000);
+      const fail = () => {
+        clearTimeout(timeout);
+        msg.textContent = 'Não foi possível carregar a imagem desse link. Confira o endereço (precisa ser público).';
+        msg.style.color = 'var(--danger)';
+      };
+      probe.onload = () => {
+        clearTimeout(timeout);
+        Store.setLogo(url);
+        if (window.QCApplyLogo) window.QCApplyLogo(url);
+        renderSettingsTab(content);
+      };
+      probe.onerror = fail;
+      probe.src = url;
     });
 
     content.querySelector('#btn-export').addEventListener('click', () => {

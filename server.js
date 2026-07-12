@@ -73,6 +73,12 @@ function sanitizeImage(value, maxBytes) {
     ? value : null;
 }
 
+// Logomarca também pode ser um link http(s) de imagem
+function sanitizeLogoUrl(value) {
+  return typeof value === 'string' && /^https?:\/\//i.test(value) && value.length <= 500
+    ? value : null;
+}
+
 function sanitizeQuiz(quiz) {
   if (!quiz || typeof quiz.name !== 'string' || !Array.isArray(quiz.questions)) return null;
   const defaultTime = Number(quiz.timePerQuestion);
@@ -211,7 +217,7 @@ function sanitizeQuiz(quiz) {
   if (questions.length === 0) return null;
   return {
     name: String(quiz.name).slice(0, 200),
-    logo: sanitizeImage(quiz.logo, 300_000), // logomarca personalizada (vai aos celulares no join)
+    logo: sanitizeImage(quiz.logo, 300_000) || sanitizeLogoUrl(quiz.logo), // logomarca personalizada (vai aos celulares no join)
     passScore: Math.min(100, Math.max(0, Number(quiz.passScore) || 0)),
     timePerQuestion: defaultTime >= 5 && defaultTime <= 600 ? Math.round(defaultTime) : DEFAULT_TIME,
     showRanking: quiz.showRanking !== false,
