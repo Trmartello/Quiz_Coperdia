@@ -984,6 +984,17 @@ const Live = (() => {
         .fail { color: #d64545; font-weight: 700; }
         .top { background: #e7f5ec; }
         .footer { margin-top: 26px; font-size: 0.75rem; color: #889; }
+        /* Pódio dos 3 primeiros (as cores precisam sair na impressão) */
+        .podium { display: flex; align-items: flex-end; justify-content: center; gap: 20px; margin: 14px 0 30px; text-align: center; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .place { width: 160px; }
+        .place .medal { font-size: 2.1rem; }
+        .place .pavatar { font-size: 1.9rem; line-height: 1.2; }
+        .place .pname { font-weight: 700; margin: 4px 0 2px; word-break: break-word; }
+        .place .ppts { color: #667; font-size: 0.85rem; margin-bottom: 8px; }
+        .place .bar { border-radius: 8px 8px 0 0; background: #0e9a44; }
+        .place.p1 .bar { height: 110px; }
+        .place.p2 .bar { height: 78px; background: #0a6e31; }
+        .place.p3 .bar { height: 54px; background: #f5a800; }
         @media print { .no-print { display: none; } }
       </style></head><body>
       <h1>🎓 Quiz Copérdia — Resultado Final</h1>
@@ -991,6 +1002,16 @@ const Live = (() => {
       ${shareInfoLine(info) ? `<p class="sub">${esc(shareInfoLine(info))}</p>` : ''}
       <p class="meta">${new Date().toLocaleString('pt-BR')} • ${rows.length} participante(s) •
         aprovação a partir de ${s.passScore}% em ${s.scorableTotal} questão(ões) que valem nota</p>
+      <div class="podium">
+        ${[1, 0, 2].filter(i => rows[i]).map(i => `
+          <div class="place p${i + 1}">
+            <div class="medal">${['🥇', '🥈', '🥉'][i]}</div>
+            <div class="pavatar">${rows[i].avatar || '🙂'}</div>
+            <div class="pname">${esc(rows[i].name)}</div>
+            <div class="ppts">${rows[i].score} pts</div>
+            <div class="bar"></div>
+          </div>`).join('')}
+      </div>
       <table>
         <thead><tr><th>#</th><th>Participante</th><th>Pontos</th><th>Acertos</th><th>Nota</th><th>Situação</th></tr></thead>
         <tbody>
@@ -1034,7 +1055,9 @@ const Live = (() => {
     const W = 900;
     const rowH = 46;
     const infoLine = shareInfoLine(info);
-    const top = infoLine ? 196 : 170;
+    const headerBottom = infoLine ? 196 : 170;
+    const podiumH = rows.length ? 280 : 0; // gráfico dos 3 primeiros
+    const top = headerBottom + podiumH;
     const H = top + rows.length * rowH + 90;
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
@@ -1057,6 +1080,38 @@ const Live = (() => {
     ctx.font = '15px Segoe UI, Arial';
     ctx.fillText(`${new Date().toLocaleString('pt-BR')} • ${rows.length} participante(s)` +
       (s.scorableTotal > 0 ? ` • nota mínima ${s.passScore}%` : ''), 28, infoLine ? 178 : 154);
+
+    // Pódio dos 3 primeiros: medalha, avatar, nome e pontos sobre a barra
+    if (podiumH) {
+      const base = headerBottom + 230;
+      const centers = { 1: W / 2 - 190, 0: W / 2, 2: W / 2 + 190 }; // 2º | 1º | 3º
+      const barH = [120, 84, 58];
+      const barColor = ['#0e9a44', '#0a6e31', '#f5a800'];
+      const barW = 130;
+      ctx.textAlign = 'center';
+      for (const i of [1, 0, 2]) {
+        if (!rows[i]) continue;
+        const cx = centers[i];
+        ctx.fillStyle = barColor[i];
+        ctx.fillRect(cx - barW / 2, base - barH[i], barW, barH[i]);
+        let y = base - barH[i] - 10;
+        ctx.fillStyle = '#667';
+        ctx.font = '14px Segoe UI, Arial';
+        ctx.fillText(`${rows[i].score} pts`, cx, y);
+        y -= 20;
+        ctx.fillStyle = '#1d1d1b';
+        ctx.font = 'bold 17px Segoe UI, Arial';
+        ctx.fillText(String(rows[i].name).slice(0, 18), cx, y);
+        y -= 26;
+        ctx.font = '26px Segoe UI, Arial';
+        ctx.fillText(rows[i].avatar || '🙂', cx, y);
+        y -= 32;
+        ctx.font = '30px Segoe UI, Arial';
+        ctx.fillText(['🥇', '🥈', '🥉'][i], cx, y);
+      }
+      ctx.textAlign = 'left';
+    }
+
     rows.forEach((r, i) => {
       const y = top + i * rowH;
       if (r.rank === 1) { ctx.fillStyle = '#e7f5ec'; ctx.fillRect(16, y - 30, W - 32, rowH - 6); }
