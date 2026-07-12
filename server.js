@@ -501,6 +501,7 @@ function snapshotFor(room, conn) {
           sliderAnswer: q.type === 'slider' ? q.sliderAnswer : undefined,
           sliderTolerance: q.type === 'slider' ? q.sliderTolerance : undefined,
           correctOrder: q.type === 'puzzle' ? q.options : undefined,
+          shuffleMap: q.type === 'puzzle' ? q.shuffleMap : undefined,
           ideas: (room.archive.get(qi) || {}).ideas,
           events: [],
         };

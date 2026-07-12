@@ -964,6 +964,72 @@ const Live = (() => {
     URL.revokeObjectURL(a.href);
   }
 
+  // Como cada participante respondeu, em texto legível por tipo de questão
+  function answerAsText(rq, ev) {
+    const q = rq.question;
+    const v = ev.value;
+    const t = q.type;
+    if (t === 'quiz' || t === 'tf' || t === 'poll') {
+      return (Array.isArray(v) ? v : [v]).map(i => q.options[i]).filter(Boolean).join(', ');
+    }
+    if (t === 'scale' || t === 'nps') return q.options[v] !== undefined ? q.options[v] : String(v);
+    if (t === 'wordcloud' || t === 'brainstorm') return (Array.isArray(v) ? v : [v]).join(' • ');
+    if (t === 'pin') return '📍 marcou um ponto na imagem';
+    if (t === 'puzzle') {
+      const seq = Array.isArray(v) && rq.shuffleMap
+        ? v.map(d => q.options[rq.shuffleMap[d]]).filter(Boolean).join(' → ') : '';
+      return seq || (ev.correct ? 'ordem correta' : 'ordem incorreta');
+    }
+    return String(v); // short, open, slider
+  }
+
+  // Resposta correta da questão em texto (null = pergunta de opinião, sem resposta certa)
+  function correctAsText(rq) {
+    const q = rq.question;
+    const t = q.type;
+    if (t === 'quiz' || t === 'tf') return (rq.corrects || []).map(i => q.options[i]).join(', ');
+    if (t === 'short') return (rq.acceptedAnswers || []).join(' / ');
+    if (t === 'slider') return `${rq.sliderAnswer}${rq.sliderTolerance > 0 ? ` (±${rq.sliderTolerance})` : ''}`;
+    if (t === 'puzzle') return (rq.correctOrder || []).map((o, i) => `${i + 1}º ${o}`).join(' → ');
+    return null;
+  }
+
+  // Segunda página do PDF: cada pergunta com a resposta correta e o que cada participante respondeu
+  function pdfQuestionsHtml(s) {
+    if (!Array.isArray(s.replay) || !s.replay.length) return '';
+    const SCORED = ['quiz', 'tf', 'short', 'slider', 'puzzle'];
+    return `
+      <div class="qa-page">
+        <h1>📋 Perguntas e respostas</h1>
+        ${s.replay.map((rq, qi) => {
+          const correct = correctAsText(rq);
+          const scored = SCORED.includes(rq.question.type);
+          return `
+          <div class="qa">
+            <h3>${qi + 1}. ${esc(rq.question.text)}
+              <small>(${(TYPE_LABELS[rq.question.type] || 'Quiz').replace(/^[^ ]+ /, '')})</small></h3>
+            ${correct
+              ? `<p class="qa-correct">✔ Resposta correta: <strong>${esc(correct)}</strong></p>`
+              : '<p class="qa-opinion">Pergunta de opinião — sem resposta certa.</p>'}
+            ${rq.question.type === 'brainstorm' && (rq.ideas || []).length
+              ? `<p class="qa-opinion">⭐ Mais votadas: ${rq.ideas.slice(0, 3).map(i => `${esc(i.text)} (${i.votes})`).join(' • ')}</p>` : ''}
+            <table class="qa-table">
+              <thead><tr><th>Participante</th><th>Resposta</th>${scored ? '<th style="width:36px"></th>' : ''}</tr></thead>
+              <tbody>
+                ${rq.events.length ? rq.events.map(ev => `
+                  <tr>
+                    <td>${ev.avatar || ''} ${esc(ev.name)}</td>
+                    <td>${esc(answerAsText(rq, ev))}</td>
+                    ${scored ? `<td class="${ev.correct ? 'pass' : 'fail'}">${ev.correct ? '✔' : '✘'}</td>` : ''}
+                  </tr>`).join('')
+                : `<tr><td colspan="${scored ? 3 : 2}" style="color:#889">Ninguém respondeu esta questão.</td></tr>`}
+              </tbody>
+            </table>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }
+
   // Abre uma janela formatada para impressão — o usuário salva como PDF
   function exportPdf(s, info = {}) {
     const rows = resultRows(s);
@@ -995,6 +1061,14 @@ const Live = (() => {
         .place.p1 .bar { height: 110px; }
         .place.p2 .bar { height: 78px; background: #0a6e31; }
         .place.p3 .bar { height: 54px; background: #f5a800; }
+        /* Segunda página: perguntas e respostas */
+        .qa-page { page-break-before: always; }
+        .qa { page-break-inside: avoid; margin-bottom: 22px; }
+        .qa h3 { margin: 0 0 4px; font-size: 1rem; }
+        .qa h3 small { color: #667; font-weight: 600; font-size: 0.78rem; }
+        .qa-correct { color: #0a6e31; font-size: 0.88rem; margin: 2px 0 8px; }
+        .qa-opinion { color: #667; font-size: 0.85rem; margin: 2px 0 8px; }
+        .qa-table th, .qa-table td { padding: 6px 10px; font-size: 0.85rem; }
         @media print { .no-print { display: none; } }
       </style></head><body>
       <h1>🎓 Quiz Copérdia — Resultado Final</h1>
@@ -1023,6 +1097,7 @@ const Live = (() => {
             </tr>`).join('')}
         </tbody>
       </table>
+      ${pdfQuestionsHtml(s)}
       <p class="footer">Gerado pelo Quiz Copérdia — validação de aprendizado em treinamentos.</p>
       <script>window.onload = () => setTimeout(() => window.print(), 300);<\/script>
       </body></html>
