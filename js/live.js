@@ -4,7 +4,7 @@ const Live = (() => {
   const COLORS = ['red', 'blue', 'yellow', 'green', 'purple', 'orange'];
   const SHAPES = ['▲', '◆', '●', '■', '★', '⬟'];
   // Mesma lista do servidor — reações rápidas permitidas
-  const REACTIONS = ['👍','👏','❤️','😂','🤪','😮','🚀','🏎️'];
+  const REACTIONS = ['👍','👏','❤️','😂','🤪','😮','🚀','🏎️','🚜','🌾','📣','🎉'];
   const TYPE_LABELS = {
     quiz: '🎯 Quiz', tf: '⚖️ Verdadeiro ou falso', short: '⌨️ Resposta curta',
     slider: '🎚️ Controle deslizante', puzzle: '🧩 Puzzle', poll: '📊 Enquete', scale: '📏 Escala',
@@ -109,6 +109,10 @@ const Live = (() => {
     if (emoji === '🏎️') return spawnRacer(layer, emoji);
     if (emoji === '🚀') return spawnRocket(layer, emoji);
     if (emoji === '🤪') return spawnBigFace(layer, emoji);
+    if (emoji === '🚜') return spawnTractor(layer, emoji);
+    if (emoji === '🌾') return spawnHarvest(layer);
+    if (emoji === '📣') return spawnHorn(layer, emoji);
+    if (emoji === '🎉') return spawnConfetti(layer);
     const el = document.createElement('span');
     el.className = 'float-emoji';
     el.textContent = emoji;
@@ -170,6 +174,77 @@ const Live = (() => {
     el.style.top = (28 + Math.random() * 34) + '%';
     el.addEventListener('animationend', () => el.remove());
     layer.appendChild(el);
+  }
+
+  // 🚜 trator estilo Copérdia: cruza a tela sacolejando e levantando poeira
+  function spawnTractor(layer, emoji) {
+    const el = document.createElement('span');
+    el.className = 'tractor-emoji';
+    el.textContent = emoji;
+    el.style.top = (25 + Math.random() * 55) + '%';
+    el.style.setProperty('--dur', (2.4 + Math.random() * 0.9).toFixed(2) + 's');
+    el.style.fontSize = (2.6 + Math.random() * 1.2).toFixed(2) + 'rem';
+    layer.appendChild(el);
+    dustTrail(layer, el, '💨');
+  }
+
+  // 🌾 colheita: chuvinha de grãos caindo e balançando
+  function spawnHarvest(layer) {
+    const grains = ['🌾', '🌽', '🌱'];
+    for (let i = 0; i < 5; i++) {
+      if (layer.childElementCount > 45) break;
+      const el = document.createElement('span');
+      el.className = 'grain-emoji';
+      el.textContent = grains[Math.floor(Math.random() * grains.length)];
+      el.style.left = (5 + Math.random() * 90) + '%';
+      el.style.setProperty('--dur', (2 + Math.random() * 1.4).toFixed(2) + 's');
+      el.style.setProperty('--sway', (Math.random() * 60 - 30).toFixed(0) + 'px');
+      el.style.animationDelay = (Math.random() * 0.5).toFixed(2) + 's';
+      el.style.fontSize = (1.6 + Math.random() * 1.2).toFixed(2) + 'rem';
+      el.addEventListener('animationend', () => el.remove());
+      layer.appendChild(el);
+    }
+  }
+
+  // 📣 buzina: megafone sacode soltando ondas sonoras que se expandem
+  function spawnHorn(layer, emoji) {
+    const el = document.createElement('span');
+    el.className = 'horn-emoji';
+    el.textContent = emoji;
+    el.style.left = (15 + Math.random() * 60) + '%';
+    el.style.top = (25 + Math.random() * 40) + '%';
+    el.addEventListener('animationend', () => el.remove());
+    layer.appendChild(el);
+    const r = el.getBoundingClientRect();
+    for (let i = 0; i < 3; i++) {
+      const ring = document.createElement('span');
+      ring.className = 'sound-ring';
+      ring.style.left = (r.left + r.width * 0.7) + 'px';
+      ring.style.top = (r.top + r.height * 0.2) + 'px';
+      ring.style.animationDelay = (i * 0.18) + 's';
+      ring.addEventListener('animationend', () => ring.remove());
+      layer.appendChild(ring);
+    }
+  }
+
+  // 🎉 confete nas cores da Copérdia despencando pela tela
+  const CONFETTI_COLORS = ['#0e9a44', '#0a6e31', '#f5a800', '#d18f00', '#ffffff'];
+  function spawnConfetti(layer) {
+    for (let i = 0; i < 22; i++) {
+      if (layer.childElementCount > 70) break; // confete tem teto próprio, mais alto
+      const c = document.createElement('span');
+      c.className = 'confetti';
+      c.style.left = (Math.random() * 100) + '%';
+      c.style.background = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+      c.style.width = (6 + Math.random() * 7) + 'px';
+      c.style.height = (10 + Math.random() * 8) + 'px';
+      c.style.setProperty('--dur', (2.2 + Math.random() * 1.6).toFixed(2) + 's');
+      c.style.setProperty('--sway', (Math.random() * 120 - 60).toFixed(0) + 'px');
+      c.style.setProperty('--spin', (Math.random() * 720 - 360).toFixed(0) + 'deg');
+      c.style.animationDelay = (Math.random() * 0.4).toFixed(2) + 's';
+      c.addEventListener('animationend', () => c.remove());
+      layer.appendChild(c);
+    }
   }
 
   let lastReactAt = 0;
@@ -943,6 +1018,8 @@ const Live = (() => {
     container.querySelector('#btn-podium-pdf').addEventListener('click', () => askShareInfo(info => exportPdf(s, info)));
     container.querySelector('#btn-podium-whats').addEventListener('click', e => askShareInfo(info => shareWhatsapp(s, e.target, info)));
     wireReviewButton(container, null);
+    // 🎉 festa automática no pódio (local, três rajadas)
+    [0, 450, 950].forEach(d => setTimeout(() => spawnReaction('🎉'), d));
   }
 
   /* ---------- Exportações do pódio ---------- */
@@ -1849,6 +1926,8 @@ const Live = (() => {
     `;
     wireReactionBar(container);
     localStorage.removeItem('qc_player');
+    // 🎉 festa automática no pódio também no celular
+    [0, 450].forEach(d => setTimeout(() => spawnReaction('🎉'), d));
   }
 
   // revealBodyHtml: usado pela administração para reassistir os resultados (replay)

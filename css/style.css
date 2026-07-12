@@ -1316,3 +1316,78 @@ img.brand-icon { object-fit: contain; }
 
 /* Barra com mais emojis: quebra linha no celular sem estourar */
 .reaction-bar { flex-wrap: wrap; }
+
+/* ===== Reações estilo Copérdia ===== */
+/* 🚜 trator sacolejando pela tela */
+.tractor-emoji {
+  position: absolute;
+  left: 0;
+  transform: translateX(-18vw);
+  animation: tractor-by var(--dur, 2.6s) linear forwards;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.25));
+  line-height: 1;
+}
+@keyframes tractor-by {
+  0% { transform: translateX(-18vw) translateY(0); }
+  20% { transform: translateX(9vw) translateY(-7px); }
+  40% { transform: translateX(36vw) translateY(1px); }
+  60% { transform: translateX(63vw) translateY(-7px); }
+  80% { transform: translateX(91vw) translateY(1px); }
+  100% { transform: translateX(118vw) translateY(0); }
+}
+
+/* 🌾 grãos da colheita caindo */
+.grain-emoji {
+  position: absolute;
+  top: -8vh;
+  animation: grain-fall var(--dur, 2.6s) ease-in forwards;
+  line-height: 1;
+}
+@keyframes grain-fall {
+  0% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--sway, 0px), 118vh) rotate(220deg); opacity: 0.85; }
+}
+
+/* 📣 buzina sacudindo + ondas sonoras */
+.horn-emoji {
+  position: absolute;
+  font-size: 3.6rem;
+  line-height: 1;
+  animation: horn-shake 1.5s ease forwards;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.25));
+}
+@keyframes horn-shake {
+  0% { transform: scale(0.3) rotate(0deg); opacity: 0; }
+  15% { transform: scale(1.25) rotate(-18deg); opacity: 1; }
+  30% { transform: scale(1.15) rotate(14deg); }
+  45% { transform: scale(1.25) rotate(-12deg); }
+  60% { transform: scale(1.15) rotate(10deg); }
+  75% { transform: scale(1.2) rotate(-6deg); opacity: 1; }
+  100% { transform: scale(1.5) rotate(0deg); opacity: 0; }
+}
+.sound-ring {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 3px solid rgba(245, 168, 0, 0.85);
+  border-radius: 50%;
+  opacity: 0;
+  animation: ring-out 0.95s ease-out forwards;
+}
+@keyframes ring-out {
+  0% { opacity: 0.9; transform: scale(0.4); }
+  100% { opacity: 0; transform: scale(4.2); }
+}
+
+/* 🎉 confete nas cores da marca */
+.confetti {
+  position: absolute;
+  top: -5vh;
+  border-radius: 2px;
+  animation: confetti-fall var(--dur, 2.8s) ease-in forwards;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.12);
+}
+@keyframes confetti-fall {
+  0% { transform: translate(0, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--sway, 0px), 118vh) rotate(var(--spin, 360deg)); opacity: 0.9; }
+}
